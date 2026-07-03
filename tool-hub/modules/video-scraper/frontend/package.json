@@ -1,0 +1,14 @@
+{
+  "name": "@tool-hub/video-scraper-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./index.tsx",
+  "types": "./index.tsx",
+  "dependencies": {
+    "@tool-hub/shared-types": "*"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

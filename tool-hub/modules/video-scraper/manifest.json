@@ -1,0 +1,12 @@
+{
+  "id": "video-scraper",
+  "name": "Video Scraper",
+  "tagline": "Any URL in, structured transcript + summary out.",
+  "icon": "film",
+  "route": "/tools/video-scraper",
+  "backendBaseUrl": "http://video-scraper-api:8001",
+  "status": "active",
+  "requiredEnv": ["OPENAI_API_KEY"],
+  "category": "content",
+  "version": "1.0.0"
+}

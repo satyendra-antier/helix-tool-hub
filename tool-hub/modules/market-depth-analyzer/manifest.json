@@ -1,0 +1,12 @@
+{
+  "id": "market-depth-analyzer",
+  "name": "Market Depth Analyzer",
+  "tagline": "Real signal, not AI opinion — where the revenue actually is.",
+  "icon": "trending-up",
+  "route": "/tools/market-depth-analyzer",
+  "backendBaseUrl": "http://market-depth-api:8002",
+  "status": "active",
+  "requiredEnv": ["OPENAI_API_KEY", "GITHUB_TOKEN", "ADZUNA_APP_ID", "ADZUNA_APP_KEY"],
+  "category": "intelligence",
+  "version": "1.0.0"
+}

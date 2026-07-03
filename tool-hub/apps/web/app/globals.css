@@ -1,0 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0a0c10;
+  --panel: #12151c;
+  --panel-raised: #171b24;
+  --border: #232833;
+  --border-bright: #343b4a;
+  --text-primary: #e9ebf0;
+  --text-secondary: #8a91a3;
+  --text-dim: #545b6b;
+  --accent-a: #ff8a34;
+  --accent-b: #6e86ff;
+  --ok: #3ed598;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background:
+    radial-gradient(circle at 15% 0%, rgba(110, 134, 255, 0.06), transparent 40%),
+    radial-gradient(circle at 85% 20%, rgba(255, 138, 52, 0.05), transparent 45%),
+    var(--bg);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+}
+
+.font-display {
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@tool-hub/lead-intelligence-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./index.tsx",
+  "types": "./index.tsx",
+  "dependencies": {
+    "@tool-hub/shared-types": "*",
+    "recharts": "^2.13.3"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "build-readiness",
+  "name": "Build Readiness Engine",
+  "tagline": "Index your company depth, cross-market demand, and get a GO / NO-GO verdict with a build plan.",
+  "icon": "compass",
+  "route": "/tools/build-readiness",
+  "backendBaseUrl": "http://build-readiness-api:8004",
+  "status": "active",
+  "requiredEnv": ["OPENAI_API_KEY"],
+  "category": "intelligence",
+  "version": "1.0.0"
+}

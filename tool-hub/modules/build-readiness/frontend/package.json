@@ -1,0 +1,9 @@
+{
+  "name": "@tool-hub/build-readiness-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.tsx",
+  "dependencies": {
+    "@tool-hub/shared-types": "*"
+  }
+}

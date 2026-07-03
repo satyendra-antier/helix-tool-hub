@@ -1,0 +1,12 @@
+{
+  "id": "lead-intelligence",
+  "name": "Lead Intelligence Engine",
+  "tagline": "Government tenders, funded projects, and hiring signals — organized, scored, never spammed.",
+  "icon": "radar",
+  "route": "/tools/lead-intelligence",
+  "backendBaseUrl": "http://lead-intelligence-api:8003",
+  "status": "active",
+  "requiredEnv": ["OPENAI_API_KEY", "APOLLO_API_KEY", "HUNTER_API_KEY", "SAM_GOV_API_KEY"],
+  "category": "growth",
+  "version": "1.0.0"
+}

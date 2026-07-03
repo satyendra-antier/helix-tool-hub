@@ -1,0 +1,6 @@
+node_modules
+.next
+.git
+*.md
+.env
+tool-hub-dashboard-mockup.html

@@ -1,0 +1,155 @@
+name: toolhub
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-toolhub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-toolhub}
+      POSTGRES_DB: ${POSTGRES_DB:-toolhub}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-toolhub}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  video-scraper-api:
+    build:
+      context: ..
+      dockerfile: modules/video-scraper/backend/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://toolhub:toolhub@postgres:5432/toolhub}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-openai}
+      MAX_VIDEO_DURATION_SECONDS: ${MAX_VIDEO_DURATION_SECONDS:-7200}
+      RATE_LIMIT_PER_DOMAIN_SECONDS: ${RATE_LIMIT_PER_DOMAIN_SECONDS:-1}
+      IGNORE_ROBOTS_TXT: ${IGNORE_ROBOTS_TXT:-false}
+    ports:
+      - "${VIDEO_SCRAPER_HOST_PORT:-8101}:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - video_scraper_media:/app/media
+
+  market-depth-api:
+    build:
+      context: ..
+      dockerfile: modules/market-depth-analyzer/backend/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://toolhub:toolhub@postgres:5432/toolhub}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
+      ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
+    ports:
+      - "${MARKET_DEPTH_HOST_PORT:-8102}:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  lead-intelligence-api:
+    build:
+      context: ..
+      dockerfile: modules/lead-intelligence/backend/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://toolhub:toolhub@postgres:5432/toolhub}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      APOLLO_API_KEY: ${APOLLO_API_KEY:-}
+      HUNTER_API_KEY: ${HUNTER_API_KEY:-}
+      CLEARBIT_API_KEY: ${CLEARBIT_API_KEY:-}
+      SAM_GOV_API_KEY: ${SAM_GOV_API_KEY:-}
+      CRUNCHBASE_API_KEY: ${CRUNCHBASE_API_KEY:-}
+    ports:
+      - "${LEAD_INTELLIGENCE_HOST_PORT:-8103}:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  build-readiness-api:
+    build:
+      context: ..
+      dockerfile: modules/build-readiness/backend/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://toolhub:toolhub@postgres:5432/toolhub}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      DEFAULT_COMPANY_URL: ${DEFAULT_COMPANY_URL:-https://www.antier.com/}
+      DEFAULT_COMPANY_NAME: ${DEFAULT_COMPANY_NAME:-Antier}
+      MAX_CRAWL_PAGES: ${MAX_CRAWL_PAGES:-120}
+      MARKET_DEPTH_API_URL: ${MARKET_DEPTH_API_URL:-http://market-depth-api:8002}
+    ports:
+      - "${BUILD_READINESS_HOST_PORT:-8104}:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      market-depth-api:
+        condition: service_started
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://toolhub:toolhub@postgres:5432/toolhub}
+      VIDEO_SCRAPER_API_URL: ${VIDEO_SCRAPER_API_URL:-http://video-scraper-api:8001}
+      MARKET_DEPTH_API_URL: ${MARKET_DEPTH_API_URL:-http://market-depth-api:8002}
+      LEAD_INTELLIGENCE_API_URL: ${LEAD_INTELLIGENCE_API_URL:-http://lead-intelligence-api:8003}
+      BUILD_READINESS_API_URL: ${BUILD_READINESS_API_URL:-http://build-readiness-api:8004}
+      VIDEO_SCRAPER_PUBLIC_URL: ${VIDEO_SCRAPER_PUBLIC_URL:-http://localhost:8101}
+      MARKET_DEPTH_PUBLIC_URL: ${MARKET_DEPTH_PUBLIC_URL:-http://localhost:8102}
+      LEAD_INTELLIGENCE_PUBLIC_URL: ${LEAD_INTELLIGENCE_PUBLIC_URL:-http://localhost:8103}
+      BUILD_READINESS_PUBLIC_URL: ${BUILD_READINESS_PUBLIC_URL:-http://localhost:8104}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
+      ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
+      APOLLO_API_KEY: ${APOLLO_API_KEY:-}
+      HUNTER_API_KEY: ${HUNTER_API_KEY:-}
+      SAM_GOV_API_KEY: ${SAM_GOV_API_KEY:-}
+    ports:
+      - "${WEB_HOST_PORT:-3200}:3000"
+    depends_on:
+      - video-scraper-api
+      - market-depth-api
+      - lead-intelligence-api
+      - build-readiness-api
+
+volumes:
+  postgres_data:
+  video_scraper_media:
