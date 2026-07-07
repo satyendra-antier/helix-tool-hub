@@ -57,15 +57,42 @@ class BuildReadinessVerdict(Base):
     __tablename__ = "build_readiness_verdicts"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     profile_id = Column(UUID(as_uuid=True), nullable=False)
+    analysis_batch_id = Column(UUID(as_uuid=True), nullable=False)
     domain_id = Column(UUID(as_uuid=True))
     domain_name = Column(String, nullable=False)
     track = Column(String, nullable=False)
     market_score = Column(Numeric, nullable=False)
     capability_score = Column(Numeric, nullable=False)
     opportunity_score = Column(Numeric, nullable=False)
-    verdict = Column(String, nullable=False)  # GO | CONDITIONAL | NO_GO
+    verdict = Column(String, nullable=False)
     verdict_json = Column(JSONB, nullable=False)
     citations = Column(JSONB, default=list)
+    market_fetched_at = Column(DateTime)
+    company_indexed_at = Column(DateTime)
+    analyzed_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BuildReadinessIndexRun(Base):
+    __tablename__ = "build_readiness_index_runs"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    profile_id = Column(UUID(as_uuid=True), nullable=False)
+    job_id = Column(UUID(as_uuid=True))
+    source_type = Column(String, nullable=False)  # website | videos
+    pages_indexed = Column(Integer, default=0)
+    chunks_indexed = Column(Integer, default=0)
+    capabilities_found = Column(Integer, default=0)
+    indexed_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BuildReadinessAnalysisRun(Base):
+    __tablename__ = "build_readiness_analysis_runs"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    profile_id = Column(UUID(as_uuid=True), nullable=False)
+    job_id = Column(UUID(as_uuid=True))
+    market_fetched_at = Column(DateTime)
+    company_indexed_at = Column(DateTime)
+    domains_analyzed = Column(Integer, default=0)
+    go_count = Column(Integer, default=0)
     analyzed_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -146,6 +173,42 @@ def run_migrations():
               progress JSONB DEFAULT '{}',
               created_at TIMESTAMPTZ DEFAULT now(),
               completed_at TIMESTAMPTZ
+            )
+        """))
+        conn.execute(text(
+            "ALTER TABLE build_readiness_verdicts "
+            "ADD COLUMN IF NOT EXISTS analysis_batch_id UUID"
+        ))
+        conn.execute(text(
+            "ALTER TABLE build_readiness_verdicts "
+            "ADD COLUMN IF NOT EXISTS market_fetched_at TIMESTAMPTZ"
+        ))
+        conn.execute(text(
+            "ALTER TABLE build_readiness_verdicts "
+            "ADD COLUMN IF NOT EXISTS company_indexed_at TIMESTAMPTZ"
+        ))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS build_readiness_index_runs (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              profile_id UUID NOT NULL,
+              job_id UUID,
+              source_type TEXT NOT NULL,
+              pages_indexed INT DEFAULT 0,
+              chunks_indexed INT DEFAULT 0,
+              capabilities_found INT DEFAULT 0,
+              indexed_at TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS build_readiness_analysis_runs (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              profile_id UUID NOT NULL,
+              job_id UUID,
+              market_fetched_at TIMESTAMPTZ,
+              company_indexed_at TIMESTAMPTZ,
+              domains_analyzed INT DEFAULT 0,
+              go_count INT DEFAULT 0,
+              analyzed_at TIMESTAMPTZ DEFAULT now()
             )
         """))
         conn.commit()

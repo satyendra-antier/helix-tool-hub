@@ -1,0 +1,78 @@
+[
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "type": "api_key",
+    "description": "Embeddings, narratives, transcription, and lead scoring",
+    "usedByModules": ["build-readiness", "market-depth-analyzer", "lead-intelligence", "video-scraper"],
+    "envKeys": ["OPENAI_API_KEY", "BUILD_READINESS_OPENAI_API_KEY", "MARKET_DEPTH_OPENAI_API_KEY", "LEAD_INTELLIGENCE_OPENAI_API_KEY", "VIDEO_SCRAPER_OPENAI_API_KEY"]
+  },
+  {
+    "id": "github",
+    "name": "GitHub",
+    "type": "api_key",
+    "description": "Developer momentum signals for market scoring",
+    "usedByModules": ["market-depth-analyzer"],
+    "envKeys": ["GITHUB_TOKEN"]
+  },
+  {
+    "id": "adzuna",
+    "name": "Adzuna",
+    "type": "api_key",
+    "description": "Hiring demand job listings",
+    "usedByModules": ["market-depth-analyzer", "lead-intelligence"],
+    "envKeys": ["ADZUNA_APP_ID", "ADZUNA_APP_KEY"]
+  },
+  {
+    "id": "defillama",
+    "name": "DefiLlama",
+    "type": "public",
+    "description": "Capital flow and TVL signals",
+    "usedByModules": ["market-depth-analyzer"]
+  },
+  {
+    "id": "hunter",
+    "name": "Hunter",
+    "type": "api_key",
+    "description": "Contact enrichment for qualified leads",
+    "usedByModules": ["lead-intelligence"],
+    "envKeys": ["HUNTER_API_KEY"]
+  },
+  {
+    "id": "apollo",
+    "name": "Apollo",
+    "type": "api_key",
+    "description": "B2B contact enrichment",
+    "usedByModules": ["lead-intelligence"],
+    "envKeys": ["APOLLO_API_KEY"]
+  },
+  {
+    "id": "sam-gov",
+    "name": "SAM.gov",
+    "type": "api_key",
+    "description": "Government tender and contract leads",
+    "usedByModules": ["lead-intelligence"],
+    "envKeys": ["SAM_GOV_API_KEY"]
+  },
+  {
+    "id": "grants-gov",
+    "name": "Grants.gov",
+    "type": "public",
+    "description": "Federal grant opportunity signals",
+    "usedByModules": ["lead-intelligence"]
+  },
+  {
+    "id": "remoteok",
+    "name": "RemoteOK",
+    "type": "public",
+    "description": "Remote hiring demand signals",
+    "usedByModules": ["market-depth-analyzer"]
+  },
+  {
+    "id": "product-hunt",
+    "name": "Product Hunt",
+    "type": "public",
+    "description": "Product launch and funding signals",
+    "usedByModules": ["market-depth-analyzer"]
+  }
+]

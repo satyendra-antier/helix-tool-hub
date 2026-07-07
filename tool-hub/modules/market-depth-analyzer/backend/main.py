@@ -22,6 +22,7 @@ from database import (
 )
 from pipeline import seed_domains, get_weights, run_refresh, recompute_from_latest
 from scoring.engine import DEFAULT_WEIGHTS
+from config import settings
 
 app = FastAPI(title="Market Depth Analyzer API", version="1.0.0")
 
@@ -88,6 +89,17 @@ def startup():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/config")
+def config_status():
+    return {
+        "openai_configured": bool(settings.resolve_api_key()),
+        "github_configured": bool(settings.github_token),
+        "adzuna_configured": bool(settings.adzuna_app_id and settings.adzuna_app_key),
+        "using_dedicated_openai_key": bool(settings.market_depth_openai_api_key),
+        "chat_model": settings.resolve_chat_model(),
+    }
 
 
 @app.get("/domains")

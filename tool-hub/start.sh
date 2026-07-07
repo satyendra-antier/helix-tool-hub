@@ -78,7 +78,8 @@ case "$MODE" in
     compose logs -f
     ;;
   restart)
-    compose restart
+    log "Restarting Tool Hub stack (recreates containers if config changed)..."
+    compose up -d
     ;;
   build)
     compose build

@@ -16,8 +16,19 @@ from database import (
     LeadFitProfile, LeadSuppression, LeadJob,
     get_db, run_migrations,
 )
-from pipeline import run_discovery, get_or_create_fit_profile, process_lead
+from pipeline import (
+    run_discovery, get_or_create_fit_profile, process_lead,
+    sync_fit_profile_from_intelligence, rescore_all_leads, prune_junk_leads,
+    prune_fake_contacts,
+    re_enrich_missing_contacts,
+)
+from enrichment.contact_policy import is_portal_domain
 from scoring.lead_score import score_lead, DEFAULT_KEYWORDS, DEFAULT_WEIGHTS
+from scoring.domain_match import match_domains, classify_orientation
+from intelligence_bridge import build_intelligence_context
+from pipeline_status import get_pipeline_status
+from text_utils import clean_description
+from track_utils import track_filter_values, normalize_lead_track
 from sources.base import RawLead
 from sources import fetch_all_sources
 
@@ -53,6 +64,30 @@ class SuppressRequest(BaseModel):
     reason: str = "unsubscribe"
 
 
+def _portal_link(entity: LeadEntity) -> str | None:
+    payload = entity.raw_payload or {}
+    for key in ("link", "url"):
+        val = payload.get(key)
+        if isinstance(val, str) and val.startswith("http"):
+            return val
+    opp = payload.get("opp")
+    if isinstance(opp, dict):
+        opp_id = opp.get("id") or opp.get("oppId") or opp.get("number")
+        if opp_id:
+            return f"https://www.grants.gov/search-results-detail/{opp_id}"
+    if entity.domain and is_portal_domain(entity.domain):
+        portal_urls = {
+            "grants.gov": "https://www.grants.gov",
+            "sam.gov": "https://sam.gov",
+            "gem.gov.in": "https://gem.gov.in",
+            "eprocure.gov.in": "https://eprocure.gov.in",
+            "worldbank.org": "https://www.worldbank.org/en/projects-operations/procurement",
+            "ted.europa.eu": "https://ted.europa.eu",
+        }
+        return portal_urls.get(entity.domain.lower().replace("www.", ""))
+    return None
+
+
 def entity_to_dict(entity: LeadEntity, db: Session) -> dict:
     latest_score = (
         db.query(LeadScore)
@@ -74,7 +109,7 @@ def entity_to_dict(entity: LeadEntity, db: Session) -> dict:
         "name": entity.name,
         "track": entity.track,
         "domain": entity.domain,
-        "description": entity.description,
+        "description": clean_description(entity.description),
         "source": entity.source,
         "signal_type": entity.signal_type,
         "signal_value": float(entity.signal_value) if entity.signal_value else None,
@@ -98,6 +133,11 @@ def entity_to_dict(entity: LeadEntity, db: Session) -> dict:
             }
             for c in contacts
         ],
+        "lead_orientation": entity.lead_orientation or "generic",
+        "matched_domains": entity.matched_domains or [],
+        "domain_context": entity.domain_context or {},
+        "portal_link": _portal_link(entity),
+        "is_portal_lead": is_portal_domain(entity.domain),
         "created_at": entity.created_at.isoformat() if entity.created_at else None,
     }
 
@@ -115,6 +155,11 @@ def startup():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/pipeline/status")
+def pipeline_status(db: Session = Depends(get_db)):
+    return get_pipeline_status(db)
 
 
 @app.post("/discover")
@@ -155,16 +200,89 @@ def get_job(job_id: UUID, db: Session = Depends(get_db)):
 def list_leads(
     track: Optional[str] = None,
     stage: Optional[str] = None,
+    orientation: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 24,
+    sort: str = "score",
     db: Session = Depends(get_db),
 ):
-    query = db.query(LeadEntity).order_by(LeadEntity.created_at.desc())
-    if track and track != "all":
-        query = query.filter(LeadEntity.track == track)
-    entities = query.limit(200).all()
-    results = [entity_to_dict(e, db) for e in entities]
-    if stage:
-        results = [r for r in results if r["stage"] == stage]
-    return {"leads": results}
+    from sqlalchemy import text
+
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    offset = (page - 1) * page_size
+
+    track_vals = track_filter_values(track) if track and track != "all" else None
+    orient_val = orientation if orientation in ("demand", "future", "generic") else None
+
+    count_sql = """
+        SELECT COUNT(*) FROM leads_entities e
+        LEFT JOIN leads_pipeline p ON p.entity_id = e.id
+        WHERE (:track_vals IS NULL OR e.track = ANY(:track_vals))
+          AND (:orientation IS NULL OR e.lead_orientation = :orientation)
+          AND (:stage IS NULL OR p.stage = :stage)
+    """
+    total = db.execute(text(count_sql), {
+        "track_vals": track_vals,
+        "orientation": orient_val,
+        "stage": stage,
+    }).scalar() or 0
+
+    order_clause = (
+        "score DESC NULLS LAST, e.created_at DESC"
+        if sort == "score"
+        else "e.created_at DESC"
+    )
+    ids_sql = f"""
+        SELECT e.id::text
+        FROM leads_entities e
+        LEFT JOIN leads_pipeline p ON p.entity_id = e.id
+        LEFT JOIN LATERAL (
+            SELECT score FROM leads_scores ls
+            WHERE ls.entity_id = e.id
+            ORDER BY ls.computed_at DESC
+            LIMIT 1
+        ) s ON true
+        WHERE (:track_vals IS NULL OR e.track = ANY(:track_vals))
+          AND (:orientation IS NULL OR e.lead_orientation = :orientation)
+          AND (:stage IS NULL OR p.stage = :stage)
+        ORDER BY {order_clause}
+        LIMIT :limit OFFSET :offset
+    """
+    id_rows = db.execute(text(ids_sql), {
+        "track_vals": track_vals,
+        "orientation": orient_val,
+        "stage": stage,
+        "limit": page_size,
+        "offset": offset,
+    }).fetchall()
+
+    if not id_rows:
+        return {
+            "leads": [],
+            "total": int(total),
+            "page": page,
+            "page_size": page_size,
+            "pages": max(1, (int(total) + page_size - 1) // page_size),
+        }
+
+    from uuid import UUID as PyUUID
+    entity_ids = [PyUUID(r[0]) for r in id_rows]
+    entities = (
+        db.query(LeadEntity)
+        .filter(LeadEntity.id.in_(entity_ids))
+        .all()
+    )
+    order_map = {str(eid): i for i, eid in enumerate(entity_ids)}
+    entities.sort(key=lambda e: order_map.get(str(e.id), 999))
+
+    return {
+        "leads": [entity_to_dict(e, db) for e in entities],
+        "total": int(total),
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, (int(total) + page_size - 1) // page_size),
+    }
 
 
 @app.get("/leads/government")
@@ -246,8 +364,25 @@ def update_fit_profile(body: FitProfileUpdate, db: Session = Depends(get_db)):
     db.add(profile)
     db.commit()
 
+    intel_ctx = build_intelligence_context(db)
     entities = db.query(LeadEntity).all()
     for entity in entities:
+        target = (entity.domain_context or {}).get("domain_name")
+        matches = match_domains(
+            entity.description or "",
+            intel_ctx.get("market_domains") or {},
+            intel_ctx.get("verdicts") or {},
+            name=entity.name or "",
+            capability_by_domain=intel_ctx.get("capability_by_domain"),
+            target_domain=target,
+        )
+        orient, best = classify_orientation(matches, intel_ctx.get("market_domains") or {})
+        entity.lead_orientation = orient
+        entity.matched_domains = matches[:5]
+        entity.domain_context = best or {}
+        if best and best.get("track"):
+            entity.track = normalize_lead_track(best["track"])
+
         latest_score = (
             db.query(LeadScore)
             .filter(LeadScore.entity_id == entity.id)
@@ -265,6 +400,8 @@ def update_fit_profile(body: FitProfileUpdate, db: Session = Depends(get_db)):
             email_verified_score=email_verified_score,
             keywords=body.keywords,
             weights=body.weights,
+            orientation=orient,
+            best_match=best,
         )
         db.add(LeadScore(
             entity_id=entity.id,
@@ -276,7 +413,34 @@ def update_fit_profile(body: FitProfileUpdate, db: Session = Depends(get_db)):
     return {"version": version, "keywords": body.keywords, "weights": body.weights}
 
 
-@app.post("/suppression")
+@app.post("/fit-profile/sync")
+def sync_fit_profile(db: Session = Depends(get_db)):
+    """Sync keywords from Market Depth GO domains + future opportunities; re-score all leads."""
+    profile = sync_fit_profile_from_intelligence(db)
+    rescored = rescore_all_leads(db, profile)
+    removed = prune_junk_leads(db)
+    return {
+        "version": profile.version,
+        "keywords": list(profile.keywords),
+        "weights": dict(profile.weights),
+        "rescored_leads": rescored,
+        "junk_removed": removed,
+    }
+
+
+@app.post("/leads/cleanup")
+def cleanup_junk_leads(db: Session = Depends(get_db)):
+    junk_removed = prune_junk_leads(db)
+    fake_contacts_removed = prune_fake_contacts(db)
+    contacts_added = re_enrich_missing_contacts(db)
+    return {
+        "removed": junk_removed,
+        "fake_contacts_removed": fake_contacts_removed,
+        "contacts_added": contacts_added,
+    }
+
+
+@app.post("/suppressions")
 def add_suppression(body: SuppressRequest, db: Session = Depends(get_db)):
     existing = db.query(LeadSuppression).filter(LeadSuppression.email == body.email.lower()).first()
     if not existing:
@@ -290,12 +454,17 @@ def export_csv(db: Session = Depends(get_db)):
     entities = db.query(LeadEntity).all()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["name", "track", "domain", "signal_type", "score", "stage", "deadline", "source"])
+    writer.writerow([
+            "name", "track", "domain", "signal_type", "score", "stage",
+            "orientation", "matched_domain", "deadline", "source",
+        ])
     for entity in entities:
         data = entity_to_dict(entity, db)
+        matched = (data.get("domain_context") or {}).get("domain_name") or ""
         writer.writerow([
             data["name"], data["track"], data["domain"], data["signal_type"],
-            data["score"], data["stage"], data["deadline"], data["source"],
+            data["score"], data["stage"], data.get("lead_orientation"),
+            matched, data["deadline"], data["source"],
         ])
     output.seek(0)
     return StreamingResponse(

@@ -1,17 +1,17 @@
-import json
 from openai import OpenAI
 from config import settings
 
 
 def get_client() -> OpenAI:
-    if not settings.openai_api_key:
-        raise ValueError("OPENAI_API_KEY required")
-    return OpenAI(api_key=settings.openai_api_key)
+    key = settings.resolve_api_key()
+    if not key:
+        raise ValueError("MARKET_DEPTH_OPENAI_API_KEY or OPENAI_API_KEY required")
+    return OpenAI(api_key=key)
 
 
 def chat(prompt: str, *, json_mode: bool = False) -> str:
     kwargs: dict = {
-        "model": settings.openai_model,
+        "model": settings.resolve_chat_model(),
         "messages": [{"role": "user", "content": prompt}],
     }
     if json_mode:
@@ -24,4 +24,5 @@ def chat(prompt: str, *, json_mode: bool = False) -> str:
 
 
 def parse_json(text: str) -> dict:
+    import json
     return json.loads(text)

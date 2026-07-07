@@ -6,6 +6,7 @@ WORKDIR /app
 COPY package.json ./
 COPY apps/web/package.json ./apps/web/
 COPY packages/shared-types/package.json ./packages/shared-types/
+COPY packages/ui/package.json ./packages/ui/
 COPY modules/video-scraper/frontend/package.json ./modules/video-scraper/frontend/
 COPY modules/market-depth-analyzer/frontend/package.json ./modules/market-depth-analyzer/frontend/
 COPY modules/lead-intelligence/frontend/package.json ./modules/lead-intelligence/frontend/

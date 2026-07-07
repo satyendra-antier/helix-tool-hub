@@ -8,6 +8,8 @@ import httpx
 from bs4 import BeautifulSoup
 from config import settings
 from sources.base import RawLead
+from text_utils import clean_description
+from sources.market_aligned import fetch_market_aligned_sources
 
 _last_request: dict[str, float] = {}
 
@@ -74,7 +76,7 @@ def fetch_sam_gov() -> list[RawLead]:
                 name=title[:200],
                 track="government",
                 domain="sam.gov",
-                description=opp.get("description", title)[:500],
+                description=clean_description(opp.get("description", title), 500),
                 source="sam.gov",
                 signal_type="tender",
                 signal_value=float(value) if value else None,
@@ -378,7 +380,7 @@ def _fetch_product_hunt_fallback() -> list[RawLead]:
                 name=entry.get("title", "Product Hunt Launch")[:100],
                 track="web2",
                 domain=None,
-                description=entry.get("summary", "")[:300],
+                description=clean_description(entry.get("summary", ""), 300),
                 source="producthunt_rss",
                 signal_type="launch",
                 signal_date=date.today(),
@@ -418,13 +420,19 @@ def fetch_yc_ai() -> list[RawLead]:
 
 
 def fetch_crunchbase_rss() -> list[RawLead]:
+    from lead_quality import extract_company_from_headline, is_aggregate_title
     import feedparser
     leads: list[RawLead] = []
     try:
         feed = feedparser.parse("https://news.crunchbase.com/feed/")
-        for entry in feed.entries[:10]:
-            title = entry.get("title", "")
-            if not any(w in title.lower() for w in ["raise", "funding", "series", "million", "seed"]):
+        for entry in feed.entries[:20]:
+            title = (entry.get("title") or "").strip()
+            if not title or is_aggregate_title(title):
+                continue
+            company = extract_company_from_headline(title)
+            if not company:
+                continue
+            if not any(w in title.lower() for w in ["raise", "funding", "series", "million", "seed", "lands", "secures"]):
                 continue
             match = re.search(r"(\$[\d.]+[MBK]?)", title)
             value = None
@@ -435,12 +443,12 @@ def fetch_crunchbase_rss() -> list[RawLead]:
                     value = float(raw.replace("M", "").replace("B", "").replace("K", "")) * mult
                 except ValueError:
                     pass
-            company = title.split(" Raises")[0].split(" raises")[0].strip()
+            track = "ai" if any(w in title.lower() for w in [" ai", "llm", "agent", "ml "]) else "web2"
             leads.append(RawLead(
                 name=company[:100],
-                track="web2",
+                track=track,
                 domain=None,
-                description=title,
+                description=clean_description(title, 500),
                 source="crunchbase_rss",
                 signal_type="funding",
                 signal_value=value,
@@ -452,7 +460,7 @@ def fetch_crunchbase_rss() -> list[RawLead]:
     return leads
 
 
-def fetch_all_sources() -> list[RawLead]:
+def fetch_all_sources(intel_ctx: dict | None = None) -> list[RawLead]:
     leads: list[RawLead] = []
     leads.extend(fetch_sam_gov())
     leads.extend(fetch_grants_gov())
@@ -465,4 +473,6 @@ def fetch_all_sources() -> list[RawLead]:
     leads.extend(fetch_product_hunt())
     leads.extend(fetch_yc_ai())
     leads.extend(fetch_crunchbase_rss())
+    if intel_ctx:
+        leads.extend(fetch_market_aligned_sources(intel_ctx))
     return leads

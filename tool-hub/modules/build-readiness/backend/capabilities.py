@@ -35,6 +35,16 @@ CAPABILITY_TAXONOMY: dict[str, list[str]] = {
         "wallet", "exchange", "custody", "rpc", "node", "indexer", "oracle",
         "bridge", "payment", "staking",
     ],
+    "stablecoins_payments": [
+        "stablecoin", "usdc", "usdt", "dai", "payment rail", "remittance",
+        "fiat-backed", "cbdc", "mint", "redeem", "reserve attestation",
+        "cross-border payment", "merchant payment", "payroll", "treasury",
+    ],
+    "rwa_tokenization": [
+        "rwa", "real world asset", "tokenization", "asset tokenization",
+        "security token", "sto", "fractional ownership", "tokenized asset",
+        "real estate token", "treasury tokenization",
+    ],
 }
 
 

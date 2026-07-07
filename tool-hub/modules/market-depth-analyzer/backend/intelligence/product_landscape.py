@@ -13,6 +13,8 @@ PRODUCT_PATTERNS: list[tuple[str, list[str]]] = [
     ("LLM APIs & Dev Tools", ["llm", "langchain", "inference", "model serving", "llmops"]),
     ("Smart Contract Platforms", ["solidity", "smart contract", "contract"]),
     ("DeFi Protocols (DEX/Lending)", ["defi", "amm", "swap", "lending", "liquidity"]),
+    ("Stablecoins & Payment Rails", ["stablecoin", "usdc", "usdt", "payment", "remittance", "fiat-backed", "cbdc"]),
+    ("RWA & Asset Tokenization", ["rwa", "tokenization", "real world asset", "security token", "asset-backed"]),
     ("Blockchain Security / Auditing", ["audit", "security", "exploit", "formal verification"]),
     ("L2 / Rollup Infrastructure", ["rollup", "layer 2", "l2", "zk", "optimistic"]),
     ("Tokenomics / Growth Tools", ["tokenomics", "airdrop", "growth", "marketing"]),
@@ -48,6 +50,17 @@ PRODUCT_TYPE_REVENUE_MODELS: dict[str, list[dict[str, str]]] = {
         {"model": "Trading / swap fees", "note": "DEX and aggregator fee capture"},
         {"model": "Lending spread", "note": "Borrow/lend rate differential"},
         {"model": "Liquidity incentives", "note": "Token emissions to liquidity providers"},
+    ],
+    "Stablecoins & Payment Rails": [
+        {"model": "Payment API fees", "note": "Per-transaction or volume-based B2B payment rails"},
+        {"model": "Reserve yield / issuance spread", "note": "Treasury yield on fiat reserves backing stablecoins"},
+        {"model": "Cross-border remittance fees", "note": "FX and settlement fees on international transfers"},
+        {"model": "Compliance & attestation SaaS", "note": "Reserve proof, KYC/AML, and regulatory reporting tools"},
+    ],
+    "RWA & Asset Tokenization": [
+        {"model": "Tokenization platform fees", "note": "Per-asset or AUM-based tokenization SaaS"},
+        {"model": "Issuance & lifecycle management", "note": "Mint, transfer restriction, and redemption tooling"},
+        {"model": "Compliance & investor onboarding", "note": "KYC/AML and accredited-investor workflows for RWAs"},
     ],
     "Blockchain Security / Auditing": [
         {"model": "Audit fees", "note": "Per-engagement security assessments"},

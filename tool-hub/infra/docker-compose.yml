@@ -24,6 +24,18 @@ services:
       timeout: 3s
       retries: 10
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-toolhub}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-toolhubsecret}
+    ports:
+      - "${MINIO_HOST_PORT:-9100}:9000"
+      - "${MINIO_CONSOLE_PORT:-9101}:9001"
+    volumes:
+      - minio_data:/data
+
   video-scraper-api:
     build:
       context: ..
@@ -33,12 +45,22 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://toolhub:toolhub@postgres:5432/toolhub}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
-      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-openai}
+      VIDEO_SCRAPER_OPENAI_API_KEY: ${VIDEO_SCRAPER_OPENAI_API_KEY:-}
+      VIDEO_SCRAPER_OPENAI_MODEL: ${VIDEO_SCRAPER_OPENAI_MODEL:-}
+      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-local}
+      TRANSCRIPTION_MODEL: ${TRANSCRIPTION_MODEL:-whisper-1}
+      LOCAL_WHISPER_MODEL: ${LOCAL_WHISPER_MODEL:-small}
       MAX_VIDEO_DURATION_SECONDS: ${MAX_VIDEO_DURATION_SECONDS:-7200}
       RATE_LIMIT_PER_DOMAIN_SECONDS: ${RATE_LIMIT_PER_DOMAIN_SECONDS:-1}
       IGNORE_ROBOTS_TXT: ${IGNORE_ROBOTS_TXT:-false}
+      VIDEO_DISCOVERY_IGNORE_ROBOTS: ${VIDEO_DISCOVERY_IGNORE_ROBOTS:-true}
+      MINIO_ENABLED: ${MINIO_ENABLED:-true}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-toolhub}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-toolhubsecret}
+      MINIO_BUCKET: ${MINIO_BUCKET:-video-scraper-temp}
+      MINIO_SECURE: ${MINIO_SECURE:-false}
     ports:
       - "${VIDEO_SCRAPER_HOST_PORT:-8101}:8001"
     depends_on:
@@ -46,6 +68,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_started
     volumes:
       - video_scraper_media:/app/media
 
@@ -58,8 +82,9 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://toolhub:toolhub@postgres:5432/toolhub}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      MARKET_DEPTH_OPENAI_API_KEY: ${MARKET_DEPTH_OPENAI_API_KEY:-}
+      MARKET_DEPTH_OPENAI_MODEL: ${MARKET_DEPTH_OPENAI_MODEL:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
       ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
@@ -80,13 +105,16 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://toolhub:toolhub@postgres:5432/toolhub}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      LEAD_INTELLIGENCE_OPENAI_API_KEY: ${LEAD_INTELLIGENCE_OPENAI_API_KEY:-}
+      LEAD_INTELLIGENCE_OPENAI_MODEL: ${LEAD_INTELLIGENCE_OPENAI_MODEL:-}
       APOLLO_API_KEY: ${APOLLO_API_KEY:-}
       HUNTER_API_KEY: ${HUNTER_API_KEY:-}
       CLEARBIT_API_KEY: ${CLEARBIT_API_KEY:-}
       SAM_GOV_API_KEY: ${SAM_GOV_API_KEY:-}
       CRUNCHBASE_API_KEY: ${CRUNCHBASE_API_KEY:-}
+      ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
+      ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
     ports:
       - "${LEAD_INTELLIGENCE_HOST_PORT:-8103}:8003"
     depends_on:
@@ -103,8 +131,9 @@ services:
       - ../.env
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://toolhub:toolhub@postgres:5432/toolhub}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      BUILD_READINESS_OPENAI_API_KEY: ${BUILD_READINESS_OPENAI_API_KEY:-}
+      BUILD_READINESS_OPENAI_MODEL: ${BUILD_READINESS_OPENAI_MODEL:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       DEFAULT_COMPANY_URL: ${DEFAULT_COMPANY_URL:-https://www.antier.com/}
       DEFAULT_COMPANY_NAME: ${DEFAULT_COMPANY_NAME:-Antier}
@@ -134,7 +163,6 @@ services:
       MARKET_DEPTH_PUBLIC_URL: ${MARKET_DEPTH_PUBLIC_URL:-http://localhost:8102}
       LEAD_INTELLIGENCE_PUBLIC_URL: ${LEAD_INTELLIGENCE_PUBLIC_URL:-http://localhost:8103}
       BUILD_READINESS_PUBLIC_URL: ${BUILD_READINESS_PUBLIC_URL:-http://localhost:8104}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
@@ -142,14 +170,24 @@ services:
       APOLLO_API_KEY: ${APOLLO_API_KEY:-}
       HUNTER_API_KEY: ${HUNTER_API_KEY:-}
       SAM_GOV_API_KEY: ${SAM_GOV_API_KEY:-}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-toolhub-dev-secret}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3200}
+      HUB_ADMIN_PASSWORD: ${HUB_ADMIN_PASSWORD:-admin123}
     ports:
       - "${WEB_HOST_PORT:-3200}:3000"
     depends_on:
-      - video-scraper-api
-      - market-depth-api
-      - lead-intelligence-api
-      - build-readiness-api
+      postgres:
+        condition: service_healthy
+      video-scraper-api:
+        condition: service_started
+      market-depth-api:
+        condition: service_started
+      lead-intelligence-api:
+        condition: service_started
+      build-readiness-api:
+        condition: service_started
 
 volumes:
   postgres_data:
   video_scraper_media:
+  minio_data:

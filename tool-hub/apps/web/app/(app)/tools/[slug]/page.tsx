@@ -2,6 +2,9 @@ import { notFound } from "next/navigation";
 import { getToolBySlug, resolveBackendUrl } from "@/lib/registry";
 import { ToolProvider } from "@/lib/tool-context";
 import { ToolHost } from "@/components/tool-host";
+import { ModuleAccentShell, ModulePageHeader } from "@/components/module-page-header";
+
+export const dynamic = "force-dynamic";
 
 export default function ToolPage({ params }: { params: { slug: string } }) {
   const manifest = getToolBySlug(params.slug);
@@ -19,9 +22,15 @@ export default function ToolPage({ params }: { params: { slug: string } }) {
 
   return (
     <ToolProvider manifest={manifest} backendUrl={backendUrl} vault={vault}>
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <ModuleAccentShell moduleId={params.slug}>
+        <ModulePageHeader
+          title={manifest.name}
+          description={manifest.tagline}
+          moduleId={params.slug}
+          category={manifest.category}
+        />
         <ToolHost slug={params.slug} />
-      </div>
+      </ModuleAccentShell>
     </ToolProvider>
   );
 }

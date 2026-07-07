@@ -16,6 +16,8 @@ from intelligence.product_landscape import build_product_landscape
 SEED_DOMAINS = [
     {"name": "Smart Contract Engineering", "track": "blockchain", "keywords": ["solidity", "smart contract", "ethereum"]},
     {"name": "DeFi Protocol Engineering", "track": "blockchain", "keywords": ["defi", "amm", "liquidity protocol"]},
+    {"name": "Stablecoin & Payments Engineering", "track": "blockchain", "keywords": ["stablecoin", "usdc", "usdt", "payment rail", "fiat-backed token"]},
+    {"name": "RWA / Tokenization Engineering", "track": "blockchain", "keywords": ["rwa", "tokenization", "real world asset", "asset tokenization", "security token"]},
     {"name": "Blockchain Security / Auditing", "track": "blockchain", "keywords": ["blockchain audit", "smart contract security"]},
     {"name": "L2 / Infra Engineering", "track": "blockchain", "keywords": ["layer 2", "rollup", "blockchain infrastructure"]},
     {"name": "Web3 Growth/Tokenomics", "track": "blockchain", "keywords": ["tokenomics", "web3 growth", "crypto marketing"]},
@@ -28,16 +30,17 @@ SEED_DOMAINS = [
 
 
 def seed_domains(db: Session) -> None:
-    if db.query(MarketDepthDomain).count() > 0:
-        return
+    existing_names = {d.name for d in db.query(MarketDepthDomain).all()}
     for d in SEED_DOMAINS:
-        db.add(MarketDepthDomain(
-            name=d["name"],
-            track=d["track"],
-            keywords=d["keywords"],
-            active=True,
-        ))
-    db.add(MarketDepthWeights(weights=DEFAULT_WEIGHTS))
+        if d["name"] not in existing_names:
+            db.add(MarketDepthDomain(
+                name=d["name"],
+                track=d["track"],
+                keywords=d["keywords"],
+                active=True,
+            ))
+    if db.query(MarketDepthWeights).count() == 0:
+        db.add(MarketDepthWeights(weights=DEFAULT_WEIGHTS))
     db.commit()
 
 

@@ -6,7 +6,7 @@
   "route": "/tools/video-scraper",
   "backendBaseUrl": "http://video-scraper-api:8001",
   "status": "active",
-  "requiredEnv": ["OPENAI_API_KEY"],
+  "requiredEnv": ["VIDEO_SCRAPER_OPENAI_API_KEY", "OPENAI_API_KEY"],
   "category": "content",
   "version": "1.0.0"
 }

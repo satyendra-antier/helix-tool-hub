@@ -1,12 +1,39 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   RadarChart, PolarGrid, PolarAngleAxis, Radar,
 } from "recharts";
 import { useToolContext } from "@tool-hub/shared-types/src/tool-context";
 import { DEFAULT_WEIGHTS, type WeightKey } from "@tool-hub/shared-types";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Label,
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  chartColors,
+  trackColors,
+} from "@tool-hub/ui";
+
+const FIT_COLORS: Record<string, string> = {
+  high: chartColors.success,
+  medium: chartColors.warning,
+  low: chartColors.muted,
+};
 
 type ProductLandscape = {
   demand_summary?: string;
@@ -52,8 +79,7 @@ const WEIGHT_LABELS: Record<WeightKey, string> = {
   public_interest: "Public Interest",
 };
 
-const TRACK_COLORS = { blockchain: "#FF8A34", ai: "#6E86FF" };
-const FIT_COLORS: Record<string, string> = { high: "#3ED598", medium: "#FF8A34", low: "#8A91A3" };
+const TRACK_COLORS = trackColors;
 
 function formatUsd(n: unknown): string {
   const v = Number(n);
@@ -90,9 +116,9 @@ function MarketIndicators({ indicators }: { indicators?: Record<string, unknown>
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
       {items.map((item) => (
-        <div key={item.label} className="bg-panel-raised border border-border rounded p-3">
-          <p className="font-mono text-[10px] text-text-dim uppercase">{item.label}</p>
-          <p className="font-display text-lg font-semibold mt-1">{item.value}</p>
+        <div key={item.label} className="bg-surface-muted border border-border rounded-lg p-3">
+          <p className="text-xs text-text-muted">{item.label}</p>
+          <p className="text-lg font-semibold mt-1 text-text-primary">{item.value}</p>
         </div>
       ))}
     </div>
@@ -101,10 +127,7 @@ function MarketIndicators({ indicators }: { indicators?: Record<string, unknown>
 
 export default function MarketDepthPanel() {
   const { backendUrl } = useToolContext();
-  const apiBase =
-    typeof window !== "undefined"
-      ? backendUrl.replace("market-depth-api", "localhost")
-      : backendUrl;
+  const apiBase = backendUrl;
 
   const [scores, setScores] = useState<Score[]>([]);
   const [weights, setWeights] = useState<Record<string, number>>({ ...DEFAULT_WEIGHTS });
@@ -116,17 +139,34 @@ export default function MarketDepthPanel() {
   const [detailTab, setDetailTab] = useState<"products" | "builders" | "revenue" | "market">("products");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const weightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [keyStatus, setKeyStatus] = useState<{
+    openai_configured?: boolean;
+    github_configured?: boolean;
+    adzuna_configured?: boolean;
+  }>({});
+
+  const staleApiKeyReport = Boolean(
+    keyStatus.openai_configured &&
+    report?.confidence_flags?.some((f) =>
+      /missing API key|OPENAI_API_KEY not set/i.test(f.reason)
+    )
+  );
 
   const loadData = useCallback(async () => {
     try {
-      const [snapRes, reportRes, weightsRes] = await Promise.all([
+      const [snapRes, reportRes, weightsRes, configRes] = await Promise.all([
         fetch(`${apiBase}/snapshots/latest`),
         fetch(`${apiBase}/reports/latest`),
         fetch(`${apiBase}/weights`),
+        fetch(`${apiBase}/config`),
       ]);
       const snap = await snapRes.json();
       const rep = await reportRes.json();
       const w = await weightsRes.json();
+      const cfg = await configRes.json();
+      setKeyStatus(cfg);
       setScores(snap.scores || []);
       setWeights(w.weights || { ...DEFAULT_WEIGHTS });
       setFetchedAt(snap.fetched_at);
@@ -136,7 +176,7 @@ export default function MarketDepthPanel() {
         setValidationNotes(rep.validation_notes || "");
       }
     } catch {
-      /* ignore */
+      setLoadError("Could not load market data.");
     }
   }, [apiBase]);
 
@@ -157,16 +197,19 @@ export default function MarketDepthPanel() {
     return () => clearInterval(interval);
   }, [refreshJobId, apiBase, loadData]);
 
-  const handleWeightChange = async (key: string, value: number) => {
+  const handleWeightChange = (key: string, value: number) => {
     const updated = { ...weights, [key]: value };
     setWeights(updated);
-    const res = await fetch(`${apiBase}/weights`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ weights: updated }),
-    });
-    const data = await res.json();
-    if (data.scores) setScores(data.scores);
+    if (weightDebounceRef.current) clearTimeout(weightDebounceRef.current);
+    weightDebounceRef.current = setTimeout(async () => {
+      const res = await fetch(`${apiBase}/weights`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weights: updated }),
+      });
+      const data = await res.json();
+      if (data.scores) setScores(data.scores);
+    }, 400);
   };
 
   const handleRefresh = async () => {
@@ -197,44 +240,47 @@ export default function MarketDepthPanel() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {loadError && <Alert variant="danger" title="Load error">{loadError}</Alert>}
+      {staleApiKeyReport && (
+        <Alert variant="warning" title="Report may be stale">
+          API keys are configured but the stored report predates them. Refresh to regenerate narratives.
+          <div className="mt-3">
+            <Button size="sm" onClick={handleRefresh} disabled={refreshing}>Refresh data</Button>
+          </div>
+        </Alert>
+      )}
+
       <div className="flex justify-between items-start gap-4 flex-wrap">
         <div className="flex-1 min-w-[300px]">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-ok/10 text-ok border border-ok/30">
-              algorithmic scoring
-            </span>
-            <span className="font-mono text-[10px] text-text-dim">
-              min-max normalization · live APIs only · no synthetic data
-            </span>
-          </div>
           {report?.executive_summary ? (
-            <div className="bg-panel border border-border rounded-lg p-5">
-              <div className="flex items-center gap-2 mb-2">
-                <h2 className="font-mono text-xs text-text-dim uppercase tracking-wider">Executive Summary</h2>
-                {validationPassed !== null && (
-                  <span className={`font-mono text-[10px] px-2 py-0.5 rounded ${
-                    validationPassed ? "bg-ok/10 text-ok border border-ok/30" : "bg-yellow-900/30 text-yellow-400 border border-yellow-700"
-                  }`}>
-                    {validationPassed ? "validated ✓" : "flagged ⚠"}
-                  </span>
+            <Card className="accent-strip">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <CardTitle>Executive summary</CardTitle>
+                  {validationPassed !== null && (
+                    <Badge variant={validationPassed ? "success" : "warning"}>
+                      {validationPassed ? "Validated" : "Flagged"}
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-text-secondary leading-relaxed">{report.executive_summary}</p>
+                {validationNotes && !validationPassed && (
+                  <p className="text-xs text-warning mt-2">{validationNotes}</p>
                 )}
-              </div>
-              <p className="text-text-secondary text-sm leading-relaxed">{report.executive_summary}</p>
-            </div>
+              </CardContent>
+            </Card>
           ) : (
-            <div className="bg-panel border border-dashed border-border rounded-lg p-5 text-center">
-              <p className="font-mono text-sm text-text-dim">No report yet — click Refresh Data to pull live signals</p>
-            </div>
+            <EmptyState title="No report yet" description="Click Refresh Data to pull live market signals." />
           )}
         </div>
         <div className="text-right">
-          <button onClick={handleRefresh} disabled={refreshing}
-            className="font-mono text-sm bg-accent-b text-bg px-5 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-40">
-            {refreshing ? "Refreshing…" : "Refresh Data"}
-          </button>
+          <Button onClick={handleRefresh} disabled={refreshing}>
+            {refreshing ? "Refreshing…" : "Refresh data"}
+          </Button>
           {fetchedAt && (
-            <p className="font-mono text-[10px] text-text-dim mt-2">Last updated: {new Date(fetchedAt).toLocaleString()}</p>
+            <p className="text-xs text-text-muted mt-2">Last updated: {new Date(fetchedAt).toLocaleString()}</p>
           )}
         </div>
       </div>
@@ -296,10 +342,10 @@ export default function MarketDepthPanel() {
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height={360}>
               <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 20 }}>
-                <XAxis type="number" domain={[0, 100]} tick={{ fill: "#8A91A3", fontSize: 10 }} />
-                <YAxis type="category" dataKey="name" width={140} tick={{ fill: "#8A91A3", fontSize: 10 }} />
+                <XAxis type="number" domain={[0, 100]} tick={{ fill: chartColors.muted, fontSize: 10 }} />
+                <YAxis type="category" dataKey="name" width={140} tick={{ fill: chartColors.muted, fontSize: 10 }} />
                 <Tooltip
-                  contentStyle={{ background: "#171B24", border: "1px solid #343B4A", borderRadius: 8, fontFamily: "JetBrains Mono", fontSize: 11 }}
+                  contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7", borderRadius: 8, fontSize: 12 }}
                   formatter={(v: number) => [v.toFixed(1), "Score"]}
                   labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName || ""}
                 />
@@ -310,7 +356,7 @@ export default function MarketDepthPanel() {
                     if (match) { setSelected(match); setDetailTab("products"); }
                   }}>
                   {chartData.map((entry, i) => (
-                    <Cell key={i} fill={TRACK_COLORS[entry.track as keyof typeof TRACK_COLORS] || "#6E86FF"} />
+                    <Cell key={i} fill={TRACK_COLORS[entry.track as keyof typeof TRACK_COLORS] || chartColors.primary} />
                   ))}
                 </Bar>
               </BarChart>
@@ -331,43 +377,37 @@ export default function MarketDepthPanel() {
                 </div>
                 <input type="range" min={0} max={1} step={0.05} value={weights[key] ?? 0}
                   onChange={(e) => handleWeightChange(key, parseFloat(e.target.value))}
-                  className="w-full accent-accent-b" />
+                  className="w-full accent-primary" />
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Domain detail panel */}
-      {selected && (
-        <div className="bg-panel border border-border rounded-lg p-6">
-          <div className="flex justify-between items-start mb-4 flex-wrap gap-3">
-            <div>
-              <h3 className="font-display text-xl font-semibold">{selected.domain}</h3>
-              <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border mt-1 inline-block"
-                style={{ color: TRACK_COLORS[selected.track as keyof typeof TRACK_COLORS], borderColor: `${TRACK_COLORS[selected.track as keyof typeof TRACK_COLORS]}40` }}>
-                {selected.track} · score {selected.composite_score.toFixed(1)}
-              </span>
-              {landscape?.demand_summary && (
-                <p className="text-text-secondary text-sm mt-3 max-w-2xl leading-relaxed">{landscape.demand_summary}</p>
-              )}
-            </div>
-            <button onClick={() => setSelected(null)} className="font-mono text-xs text-text-dim hover:text-text-primary">Close</button>
-          </div>
+      {/* Domain detail — sheet */}
+      <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
+        <SheetContent className="overflow-y-auto">
+          {selected && (
+            <>
+              <SheetHeader>
+                <SheetTitle>{selected.domain}</SheetTitle>
+                <Badge variant="outline" style={{ color: TRACK_COLORS[selected.track as keyof typeof TRACK_COLORS] }}>
+                  {selected.track} · score {selected.composite_score.toFixed(1)}
+                </Badge>
+                {landscape?.demand_summary && (
+                  <p className="text-sm text-text-secondary mt-2">{landscape.demand_summary}</p>
+                )}
+              </SheetHeader>
 
-          {/* Detail tabs */}
-          <div className="flex gap-1 mb-5 border-b border-border">
-            {(["products", "builders", "revenue", "market"] as const).map((tab) => (
-              <button key={tab} onClick={() => setDetailTab(tab)}
-                className={`font-mono text-xs px-4 py-2 capitalize border-b-2 -mb-px ${
-                  detailTab === tab ? "border-accent-b text-accent-b" : "border-transparent text-text-dim hover:text-text-secondary"
-                }`}>
-                {tab === "products" ? "Product Demand" : tab === "builders" ? "Who's Building" : tab === "revenue" ? "Revenue Models" : "Market Data"}
-              </button>
-            ))}
-          </div>
+              <Tabs value={detailTab} onValueChange={(v) => setDetailTab(v as typeof detailTab)} className="mt-6">
+                <TabsList>
+                  <TabsTrigger value="products">Products</TabsTrigger>
+                  <TabsTrigger value="builders">Builders</TabsTrigger>
+                  <TabsTrigger value="revenue">Revenue</TabsTrigger>
+                  <TabsTrigger value="market">Market</TabsTrigger>
+                </TabsList>
 
-          {detailTab === "products" && (
+                <TabsContent value="products">
             <div className="space-y-5">
               <div>
                 <h4 className="font-mono text-xs text-text-dim uppercase mb-3">Product Types In Demand</h4>
@@ -421,9 +461,9 @@ export default function MarketDepthPanel() {
                 </div>
               )}
             </div>
-          )}
+                </TabsContent>
 
-          {detailTab === "builders" && (
+                <TabsContent value="builders">
             <div>
               <h4 className="font-mono text-xs text-text-dim uppercase mb-3">Who Is Building</h4>
               {landscape?.builders?.length ? (
@@ -457,9 +497,9 @@ export default function MarketDepthPanel() {
                 <p className="font-mono text-xs text-text-dim">No builders identified — refresh with GITHUB_TOKEN and job API keys configured</p>
               )}
             </div>
-          )}
+                </TabsContent>
 
-          {detailTab === "revenue" && (
+                <TabsContent value="revenue">
             <div>
               <h4 className="font-mono text-xs text-text-dim uppercase mb-3">Revenue Options For This Domain</h4>
               {landscape?.revenue_models?.length ? (
@@ -484,9 +524,9 @@ export default function MarketDepthPanel() {
                 <p className="font-mono text-xs text-text-dim">Revenue models load after refresh</p>
               )}
             </div>
-          )}
+                </TabsContent>
 
-          {detailTab === "market" && (
+                <TabsContent value="market">
             <div className="space-y-5">
               <div>
                 <h4 className="font-mono text-xs text-text-dim uppercase mb-3">Market Indicators</h4>
@@ -496,9 +536,9 @@ export default function MarketDepthPanel() {
                 <h4 className="font-mono text-xs text-text-dim uppercase mb-3">Signal Breakdown</h4>
                 <ResponsiveContainer width="100%" height={200}>
                   <RadarChart data={radarData}>
-                    <PolarGrid stroke="#232833" />
-                    <PolarAngleAxis dataKey="metric" tick={{ fill: "#8A91A3", fontSize: 9 }} />
-                    <Radar dataKey="value" stroke="#6E86FF" fill="#6E86FF" fillOpacity={0.2} />
+                    <PolarGrid stroke="#e4e4e7" />
+                    <PolarAngleAxis dataKey="metric" tick={{ fill: chartColors.muted, fontSize: 9 }} />
+                    <Radar dataKey="value" stroke={chartColors.primary} fill={chartColors.primary} fillOpacity={0.2} />
                   </RadarChart>
                 </ResponsiveContainer>
               </div>
@@ -523,9 +563,12 @@ export default function MarketDepthPanel() {
                 </div>
               </div>
             </div>
+                </TabsContent>
+              </Tabs>
+            </>
           )}
-        </div>
-      )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

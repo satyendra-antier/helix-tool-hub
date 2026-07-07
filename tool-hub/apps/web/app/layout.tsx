@@ -1,22 +1,20 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { ShellNav } from "@/components/shell-nav";
+import { ToastProvider } from "@tool-hub/ui";
+import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
-  title: "Tool Hub",
-  description: "One launcher. Every tool plugs into the same registry.",
+  title: "Tool Hub — Revenue Intelligence Engine",
+  description: "Deterministic revenue operating system for technical services firms.",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <ShellNav />
-        <main>{children}</main>
+        <Providers>
+          <ToastProvider>{children}</ToastProvider>
+        </Providers>
       </body>
     </html>
   );

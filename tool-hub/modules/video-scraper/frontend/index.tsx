@@ -1,7 +1,59 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useToolContext } from "@tool-hub/shared-types/src/tool-context";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  EmptyState,
+  Input,
+  Progress as ProgressBarUI,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  useToast,
+} from "@tool-hub/ui";
+
+const ACTIVE_JOB_KEY = "toolhub.videoScraper.activeJobId";
+const TERMINAL_STATUSES = new Set(["done", "partial", "failed"]);
+
+type Progress = {
+  videos_total?: number;
+  videos_done?: number;
+  videos_failed?: number;
+  videos_processing?: number;
+  percent?: number;
+  current_index?: number;
+  current_video_title?: string;
+  current_status?: string;
+};
+
+type VideoItem = {
+  id: string;
+  video_url: string;
+  sort_order: number;
+  status: string;
+  error?: string;
+  title?: string;
+  channel_or_author?: string;
+  duration_seconds?: number;
+  thumbnail_url?: string;
+  transcript?: string;
+  transcript_source?: string;
+  summary_json?: SummaryJson;
+};
+
+type SummaryJson = {
+  one_line_summary: string;
+  key_points: string[];
+  chapters: { timestamp_hint: string; title: string }[];
+  notable_quotes: string[];
+  topics: string[];
+};
 
 type Job = {
   id: string;
@@ -15,64 +67,79 @@ type Job = {
   thumbnail_url?: string;
   transcript?: string;
   transcript_source?: string;
-  summary_json?: {
-    one_line_summary: string;
-    key_points: string[];
-    chapters: { timestamp_hint: string; title: string }[];
-    notable_quotes: string[];
-    topics: string[];
-  };
+  summary_json?: SummaryJson;
+  is_batch?: boolean;
+  progress?: Progress;
+  items?: VideoItem[];
+  items_count?: number;
   created_at?: string;
+  completed_at?: string;
 };
 
-const STAGES = ["queued", "extracting", "transcribing", "summarizing", "done"];
+type ViewTarget = {
+  id: string;
+  title?: string;
+  channel_or_author?: string;
+  duration_seconds?: number;
+  thumbnail_url?: string;
+  transcript?: string;
+  transcript_source?: string;
+  summary_json?: SummaryJson;
+  video_url?: string;
+  status: string;
+  error?: string;
+};
 
-function StageStepper({ status }: { status: string }) {
-  const idx = STAGES.indexOf(status);
-  const activeIdx = idx === -1 ? (status === "failed" ? -1 : 0) : idx;
+function ProgressBar({ progress }: { progress?: Progress }) {
+  const pct = Math.min(100, Math.max(0, progress?.percent ?? 0));
+  const total = progress?.videos_total ?? 0;
+  const done = progress?.videos_done ?? 0;
+  const failed = progress?.videos_failed ?? 0;
 
   return (
-    <div className="flex items-center gap-1 mb-6 overflow-x-auto">
-      {STAGES.slice(1).map((stage, i) => {
-        const stageIdx = i + 1;
-        const done = activeIdx >= stageIdx;
-        const current = activeIdx === stageIdx;
-        return (
-          <div key={stage} className="flex items-center gap-1">
-            <div
-              className={`font-mono text-[10px] px-2 py-1 rounded uppercase tracking-wider whitespace-nowrap ${
-                done
-                  ? "bg-ok/15 text-ok border border-ok/30"
-                  : current
-                  ? "bg-accent-a/15 text-accent-a border border-accent-a/30 animate-pulse"
-                  : "bg-panel text-text-dim border border-border"
-              }`}
-            >
-              {stage}
-            </div>
-            {i < STAGES.length - 2 && (
-              <span className="text-text-dim text-xs">→</span>
-            )}
-          </div>
-        );
-      })}
+    <div className="mb-4 space-y-2">
+      <div className="flex justify-between text-xs text-text-secondary">
+        <span>{total > 1 ? `Video ${done + failed} of ${total}` : "Processing video"}</span>
+        <span className="text-primary font-medium">{pct}%</span>
+      </div>
+      <ProgressBarUI value={pct} />
+      {failed > 0 && <p className="text-xs text-danger">{failed} failed</p>}
+      {progress?.current_video_title && progress.current_status && (
+        <p className="text-xs text-text-muted truncate">
+          {progress.current_status}: {progress.current_video_title}
+        </p>
+      )}
     </div>
   );
 }
 
+function itemStatusIcon(status: string) {
+  if (status === "done") return <span className="text-ok">✓</span>;
+  if (status === "failed") return <span className="text-red-400">✗</span>;
+  if (status === "queued") return <span className="text-text-dim">○</span>;
+  return <span className="text-accent-a animate-pulse">●</span>;
+}
+
 export default function VideoScraperPanel() {
   const { backendUrl } = useToolContext();
-  const apiBase =
-    typeof window !== "undefined"
-      ? backendUrl.replace("video-scraper-api", "localhost")
-      : backendUrl;
+  const apiBase = backendUrl;
+  const { toast } = useToast();
 
   const [url, setUrl] = useState("");
   const [urlError, setUrlError] = useState("");
   const [activeJob, setActiveJob] = useState<Job | null>(null);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [recentJobs, setRecentJobs] = useState<Job[]>([]);
   const [tab, setTab] = useState<"overview" | "summary" | "transcript" | "export">("overview");
   const [loading, setLoading] = useState(false);
+  const [showCompleteBanner, setShowCompleteBanner] = useState(false);
+  const prevStatusRef = useRef<string | null>(null);
+
+  const fetchJob = useCallback(async (jobId: string) => {
+    const res = await fetch(`${apiBase}/jobs/${jobId}`);
+    if (!res.ok) throw new Error("Job not found");
+    return (await res.json()) as Job;
+  }, [apiBase]);
 
   const fetchRecent = useCallback(async () => {
     try {
@@ -84,23 +151,62 @@ export default function VideoScraperPanel() {
     }
   }, [apiBase]);
 
-  useEffect(() => {
-    fetchRecent();
-  }, [fetchRecent]);
+  const persistActiveJob = (jobId: string | null) => {
+    if (typeof window === "undefined") return;
+    if (jobId) localStorage.setItem(ACTIVE_JOB_KEY, jobId);
+    else localStorage.removeItem(ACTIVE_JOB_KEY);
+  };
 
   useEffect(() => {
-    if (!activeJob || ["done", "failed"].includes(activeJob.status)) return;
+    fetchRecent();
+    const saved = localStorage.getItem(ACTIVE_JOB_KEY);
+    if (!saved) return;
+    fetchJob(saved)
+      .then((job) => {
+        setActiveJob(job);
+        if (job.is_batch && job.items?.length) {
+          const firstDone = job.items.find((i) => i.status === "done");
+          setSelectedItemId(firstDone?.id ?? job.items[0].id);
+        }
+        if (TERMINAL_STATUSES.has(job.status)) {
+          persistActiveJob(null);
+        }
+      })
+      .catch(() => persistActiveJob(null));
+  }, [fetchJob, fetchRecent]);
+
+  useEffect(() => {
+    if (!activeJob || TERMINAL_STATUSES.has(activeJob.status)) return;
     const interval = setInterval(async () => {
-      const res = await fetch(`${apiBase}/jobs/${activeJob.id}`);
-      const job = await res.json();
-      setActiveJob(job);
-      if (job.status === "done" || job.status === "failed") {
-        fetchRecent();
+      try {
+        const job = await fetchJob(activeJob.id);
+        setActiveJob(job);
+        if (TERMINAL_STATUSES.has(job.status)) {
+          persistActiveJob(null);
+          fetchRecent();
+          clearInterval(interval);
+        }
+      } catch {
         clearInterval(interval);
       }
-    }, 2000);
+    }, 2500);
     return () => clearInterval(interval);
-  }, [activeJob, apiBase, fetchRecent]);
+  }, [activeJob?.id, activeJob?.status, fetchJob, fetchRecent]);
+
+  useEffect(() => {
+    if (!activeJob) return;
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = activeJob.status;
+    if (
+      prev &&
+      !TERMINAL_STATUSES.has(prev) &&
+      (activeJob.status === "done" || activeJob.status === "partial")
+    ) {
+      setShowCompleteBanner(true);
+      const t = setTimeout(() => setShowCompleteBanner(false), 8000);
+      return () => clearTimeout(t);
+    }
+  }, [activeJob?.status]);
 
   const handleScrape = async () => {
     try {
@@ -111,6 +217,7 @@ export default function VideoScraperPanel() {
     }
     setUrlError("");
     setLoading(true);
+    setShowCompleteBanner(false);
     try {
       const res = await fetch(`${apiBase}/jobs`, {
         method: "POST",
@@ -118,239 +225,340 @@ export default function VideoScraperPanel() {
         body: JSON.stringify({ url }),
       });
       const data = await res.json();
-      const jobRes = await fetch(`${apiBase}/jobs/${data.job_id}`);
-      setActiveJob(await jobRes.json());
-    } catch (e) {
+      const job = await fetchJob(data.job_id);
+      setActiveJob(job);
+      setSelectedItemId(null);
+      persistActiveJob(data.job_id);
+      prevStatusRef.current = job.status;
+    } catch {
       setUrlError("Failed to start scrape");
     } finally {
       setLoading(false);
     }
   };
 
+  const selectJob = async (job: Job) => {
+    const full = await fetchJob(job.id);
+    setActiveJob(full);
+    setTab("overview");
+    if (full.is_batch && full.items?.length) {
+      const firstDone = full.items.find((i) => i.status === "done");
+      setSelectedItemId(firstDone?.id ?? full.items[0].id);
+    } else {
+      setSelectedItemId(null);
+    }
+    if (!TERMINAL_STATUSES.has(full.status)) {
+      persistActiveJob(full.id);
+    }
+  };
+
+  const viewTarget: ViewTarget | null = (() => {
+    if (!activeJob) return null;
+    if (activeJob.is_batch && activeJob.items?.length) {
+      const item = activeJob.items.find((i) => i.id === selectedItemId) ?? activeJob.items[0];
+      return {
+        id: item.id,
+        title: item.title,
+        channel_or_author: item.channel_or_author,
+        duration_seconds: item.duration_seconds,
+        thumbnail_url: item.thumbnail_url,
+        transcript: item.transcript,
+        transcript_source: item.transcript_source,
+        summary_json: item.summary_json,
+        video_url: item.video_url,
+        status: item.status,
+        error: item.error,
+      };
+    }
+    return {
+      id: activeJob.id,
+      title: activeJob.title,
+      channel_or_author: activeJob.channel_or_author,
+      duration_seconds: activeJob.duration_seconds,
+      thumbnail_url: activeJob.thumbnail_url,
+      transcript: activeJob.transcript,
+      transcript_source: activeJob.transcript_source,
+      summary_json: activeJob.summary_json,
+      video_url: activeJob.source_url,
+      status: activeJob.status,
+      error: activeJob.error,
+    };
+  })();
+
   const copyTranscript = () => {
-    if (activeJob?.transcript) navigator.clipboard.writeText(activeJob.transcript);
+    if (viewTarget?.transcript) {
+      navigator.clipboard.writeText(viewTarget.transcript);
+      toast("Transcript copied", "success");
+    }
   };
 
   const downloadExport = (format: "md" | "json") => {
-    if (!activeJob) return;
+    if (!viewTarget || !activeJob) return;
+    const payload = activeJob.is_batch
+      ? { job: activeJob, item: viewTarget }
+      : activeJob;
     const content =
       format === "json"
-        ? JSON.stringify(activeJob, null, 2)
-        : `# ${activeJob.title}\n\n${activeJob.summary_json?.one_line_summary}\n\n## Key Points\n${activeJob.summary_json?.key_points.map((p) => `- ${p}`).join("\n")}\n\n## Transcript\n${activeJob.transcript}`;
+        ? JSON.stringify(payload, null, 2)
+        : `# ${viewTarget.title}\n\n${viewTarget.summary_json?.one_line_summary}\n\n## Key Points\n${viewTarget.summary_json?.key_points?.map((p) => `- ${p}`).join("\n") ?? ""}\n\n## Transcript\n${viewTarget.transcript ?? ""}`;
     const blob = new Blob([content], { type: "text/plain" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `scrape-${activeJob.id}.${format === "json" ? "json" : "md"}`;
+    a.download = `scrape-${viewTarget.id}.${format === "json" ? "json" : "md"}`;
     a.click();
   };
 
-  const isRunning = activeJob && !["done", "failed"].includes(activeJob.status);
+  const isRunning = activeJob && !TERMINAL_STATUSES.has(activeJob.status);
+  const isComplete = activeJob && (activeJob.status === "done" || activeJob.status === "partial");
+  const canViewContent = viewTarget?.status === "done";
 
   return (
-    <div className="flex gap-6">
+    <div className="flex flex-col lg:flex-row gap-6">
       <div className="flex-1 min-w-0">
-        <div className="sticky top-14 z-40 bg-bg/90 backdrop-blur py-4 border-b border-border mb-6">
-          <div className="flex gap-2">
-            <input
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="Paste any video URL — YouTube, embedded player, direct .mp4…"
-              className="flex-1 bg-panel border border-border rounded-lg px-4 py-2.5 font-mono text-sm text-text-primary placeholder:text-text-dim focus:outline-none focus:border-accent-a"
-            />
-            <button
-              onClick={handleScrape}
-              disabled={loading || !url}
-              className="font-mono text-sm bg-accent-a text-bg px-5 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-40 transition-opacity"
-            >
-              {loading ? "Starting…" : "Scrape"}
-            </button>
-          </div>
-          {urlError && (
-            <p className="text-red-400 font-mono text-xs mt-2">{urlError}</p>
-          )}
-        </div>
+        <p className="text-xs text-text-secondary mb-3">
+          Pages with multiple videos are scraped one-by-one (up to 25 per page). Progress survives page refresh.
+        </p>
+
+        {showCompleteBanner && activeJob && (
+          <Alert variant="success" title="Scrape complete" className="mb-4">
+            {activeJob.progress?.videos_done ?? 0} video(s) processed
+            {(activeJob.progress?.videos_failed ?? 0) > 0 ? ` · ${activeJob.progress?.videos_failed} failed` : ""}
+          </Alert>
+        )}
+
+        <Card className="mb-6 accent-strip">
+          <CardContent className="py-4">
+            <div className="flex gap-2">
+              <Input
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="Paste a page URL or single video link…"
+                className="flex-1"
+              />
+              <Button onClick={handleScrape} disabled={loading || !!isRunning || !url}>
+                {loading ? "Starting…" : isRunning ? "Running…" : "Scrape"}
+              </Button>
+            </div>
+            {urlError && <p className="text-danger text-xs mt-2">{urlError}</p>}
+          </CardContent>
+        </Card>
 
         {!activeJob && (
-          <div className="text-center py-20 border border-dashed border-border rounded-lg">
-            <p className="font-display text-lg text-text-secondary mb-2">
-              No scrape in progress
-            </p>
-            <p className="font-mono text-xs text-text-dim">
-              Paste a URL above to extract transcript + summary
-            </p>
-          </div>
+          <EmptyState
+            title="No scrape in progress"
+            description="Paste a URL above to extract transcripts and summaries."
+          />
         )}
 
         {activeJob && isRunning && (
-          <div className="bg-panel border border-border rounded-lg p-6">
-            <p className="font-mono text-xs text-text-dim mb-4">PIPELINE</p>
-            <StageStepper status={activeJob.status} />
-            <p className="font-mono text-sm text-text-secondary animate-pulse">
-              Processing {activeJob.source_url}…
-            </p>
-          </div>
-        )}
-
-        {activeJob?.status === "failed" && (
-          <div className="bg-red-950/30 border border-red-800 rounded-lg p-6">
-            <p className="font-mono text-sm text-red-400">Scrape failed</p>
-            <p className="font-mono text-xs text-red-300/80 mt-2">{activeJob.error}</p>
-          </div>
-        )}
-
-        {activeJob?.status === "done" && (
-          <div>
-            <div className="flex gap-1 mb-4 border-b border-border">
-              {(["overview", "summary", "transcript", "export"] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTab(t)}
-                  className={`font-mono text-xs px-4 py-2 capitalize border-b-2 -mb-px transition-colors ${
-                    tab === t
-                      ? "border-accent-a text-accent-a"
-                      : "border-transparent text-text-dim hover:text-text-secondary"
-                  }`}
-                >
-                  {t === "export" ? "Raw / Export" : t}
-                </button>
-              ))}
+          <Card className="mb-6">
+            <CardContent className="py-5">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-a opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-a" />
+              </span>
+              <p className="font-mono text-xs text-accent-a uppercase tracking-wider">
+                {activeJob.status === "discovering" ? "Discovering videos…" : "Processing batch…"}
+              </p>
             </div>
+            <ProgressBar progress={activeJob.progress} />
+            <p className="font-mono text-sm text-text-secondary truncate">{activeJob.source_url}</p>
 
-            {tab === "overview" && (
-              <div className="bg-panel border border-border rounded-lg p-6">
-                <div className="flex gap-4 mb-4">
-                  {activeJob.thumbnail_url && (
-                    <img
-                      src={activeJob.thumbnail_url}
-                      alt=""
-                      className="w-40 rounded border border-border"
-                    />
-                  )}
-                  <div>
-                    <h2 className="font-display text-xl font-semibold">{activeJob.title}</h2>
-                    <p className="font-mono text-xs text-text-dim mt-1">
-                      {activeJob.channel_or_author}
-                      {activeJob.duration_seconds
-                        ? ` · ${Math.floor(activeJob.duration_seconds / 60)}m`
-                        : ""}
-                    </p>
-                    <p className="text-text-secondary mt-3 leading-relaxed">
-                      {activeJob.summary_json?.one_line_summary}
-                    </p>
-                    <div className="flex gap-1.5 mt-3 flex-wrap">
-                      {activeJob.summary_json?.topics.map((t) => (
-                        <span
-                          key={t}
-                          className="font-mono text-[10px] bg-accent-a/10 text-accent-a border border-accent-a/30 px-2 py-0.5 rounded"
-                        >
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {tab === "summary" && (
-              <div className="bg-panel border border-border rounded-lg p-6 space-y-6">
-                <div>
-                  <h3 className="font-mono text-xs text-text-dim uppercase mb-3">Key Points</h3>
-                  <ul className="space-y-2">
-                    {activeJob.summary_json?.key_points.map((p, i) => (
-                      <li key={i} className="text-text-secondary text-sm leading-relaxed pl-4 border-l-2 border-accent-a/40">
-                        {p}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <h3 className="font-mono text-xs text-text-dim uppercase mb-3">Chapters</h3>
-                  <div className="space-y-2">
-                    {activeJob.summary_json?.chapters.map((c, i) => (
-                      <div key={i} className="flex gap-3 font-mono text-sm">
-                        <span className="text-accent-a shrink-0">{c.timestamp_hint}</span>
-                        <span className="text-text-secondary">{c.title}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {activeJob.summary_json?.notable_quotes?.length ? (
-                  <div>
-                    <h3 className="font-mono text-xs text-text-dim uppercase mb-3">Quotes</h3>
-                    {activeJob.summary_json.notable_quotes.map((q, i) => (
-                      <blockquote
-                        key={i}
-                        className="border-l-2 border-accent-b pl-4 text-text-secondary italic mb-3"
-                      >
-                        {q}
-                      </blockquote>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            )}
-
-            {tab === "transcript" && (
-              <div className="bg-panel border border-border rounded-lg p-6">
-                <div className="flex justify-between items-center mb-4">
-                  <span className="font-mono text-[10px] uppercase tracking-wider text-text-dim border border-border px-2 py-0.5 rounded">
-                    {activeJob.transcript_source}
-                  </span>
-                  <button
-                    onClick={copyTranscript}
-                    className="font-mono text-xs border border-border-bright px-3 py-1 rounded hover:border-text-primary"
+            {activeJob.is_batch && activeJob.items && activeJob.items.length > 0 && (
+              <div className="mt-4 max-h-48 overflow-y-auto space-y-1 border-t border-border pt-3">
+                {activeJob.items.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center gap-2 font-mono text-[10px] text-text-dim py-0.5"
                   >
-                    Copy
-                  </button>
+                    {itemStatusIcon(item.status)}
+                    <span className="truncate flex-1">{item.title || item.video_url}</span>
+                    <span className="uppercase shrink-0">{item.status}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            </CardContent>
+          </Card>
+        )}
+
+        {activeJob?.status === "failed" && !activeJob.is_batch && (
+          <Alert variant="danger" title="Scrape failed">{activeJob.error}</Alert>
+        )}
+
+        {isComplete && (
+          <div>
+            {activeJob.is_batch && activeJob.items && (
+              <div className="mb-4">
+                <h3 className="font-mono text-xs text-text-dim uppercase mb-2">
+                  Videos ({activeJob.progress?.videos_done}/{activeJob.progress?.videos_total})
+                </h3>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {activeJob.items.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        setSelectedItemId(item.id);
+                        setTab("overview");
+                      }}
+                      className={`text-left border rounded-lg p-3 transition-colors ${
+                        selectedItemId === item.id
+                          ? "border-accent-a bg-accent-a/5"
+                          : "border-border bg-panel hover:border-border-bright"
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <span className="mt-0.5">{itemStatusIcon(item.status)}</span>
+                        <div className="min-w-0">
+                          <p className="font-mono text-xs text-text-primary truncate">
+                            {item.title || `Video ${item.sort_order + 1}`}
+                          </p>
+                          <p className="font-mono text-[10px] text-text-dim mt-0.5">{item.status}</p>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
                 </div>
-                <pre className="font-mono text-xs text-text-secondary whitespace-pre-wrap max-h-[500px] overflow-y-auto leading-relaxed">
-                  {activeJob.transcript}
-                </pre>
               </div>
             )}
 
-            {tab === "export" && (
-              <div className="bg-panel border border-border rounded-lg p-6 flex gap-3">
-                <button
-                  onClick={() => downloadExport("md")}
-                  className="font-mono text-xs bg-panel-raised border border-border px-4 py-2 rounded hover:border-accent-a"
-                >
-                  Download .md
-                </button>
-                <button
-                  onClick={() => downloadExport("json")}
-                  className="font-mono text-xs bg-panel-raised border border-border px-4 py-2 rounded hover:border-accent-a"
-                >
-                  Download .json
-                </button>
+            {activeJob.status === "partial" && (
+              <p className="font-mono text-xs text-amber-400 mb-4">{activeJob.error}</p>
+            )}
+
+            {canViewContent && viewTarget && (
+              <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+                <TabsList>
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="summary">Summary</TabsTrigger>
+                  <TabsTrigger value="transcript">Transcript</TabsTrigger>
+                  <TabsTrigger value="export">Export</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="overview">
+                  <Card>
+                    <CardContent className="py-5">
+                    <div className="flex gap-4 mb-4">
+                      {viewTarget.thumbnail_url && (
+                        <img
+                          src={viewTarget.thumbnail_url}
+                          alt={viewTarget.title || "Video thumbnail"}
+                          className="w-40 rounded-lg border border-border"
+                        />
+                      )}
+                      <div>
+                        <h2 className="font-display text-xl font-semibold">{viewTarget.title}</h2>
+                        <p className="font-mono text-xs text-text-dim mt-1">
+                          {viewTarget.channel_or_author}
+                          {viewTarget.duration_seconds
+                            ? ` · ${Math.floor(viewTarget.duration_seconds / 60)}m`
+                            : ""}
+                        </p>
+                        <p className="text-text-secondary mt-3 leading-relaxed">
+                          {viewTarget.summary_json?.one_line_summary}
+                        </p>
+                        <div className="flex gap-1.5 mt-3 flex-wrap">
+                          {viewTarget.summary_json?.topics?.map((t) => (
+                            <Badge key={t} variant="primary">{t}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="summary">
+                  <Card>
+                    <CardContent className="py-5 space-y-6">
+                    <div>
+                      <h3 className="font-mono text-xs text-text-dim uppercase mb-3">Key Points</h3>
+                      <ul className="space-y-2">
+                        {viewTarget.summary_json?.key_points?.map((p, i) => (
+                          <li
+                            key={i}
+                            className="text-text-secondary text-sm leading-relaxed pl-4 border-l-2 border-accent-a/40"
+                          >
+                            {p}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div>
+                      <h3 className="font-mono text-xs text-text-dim uppercase mb-3">Chapters</h3>
+                      <div className="space-y-2">
+                        {viewTarget.summary_json?.chapters?.map((c, i) => (
+                          <div key={i} className="flex gap-3 font-mono text-sm">
+                            <span className="text-accent-a shrink-0">{c.timestamp_hint}</span>
+                            <span className="text-text-secondary">{c.title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="transcript">
+                  <Card>
+                    <CardContent className="py-5">
+                    <div className="flex justify-between items-center mb-4">
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-text-dim border border-border px-2 py-0.5 rounded">
+                        {viewTarget.transcript_source}
+                      </span>
+                      <Button variant="outline" size="sm" onClick={copyTranscript}>Copy</Button>
+                    </div>
+                    <pre className="font-mono text-xs text-text-secondary whitespace-pre-wrap max-h-[500px] overflow-y-auto leading-relaxed">
+                      {viewTarget.transcript}
+                    </pre>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="export">
+                  <Card>
+                    <CardContent className="py-5 flex gap-3">
+                      <Button variant="outline" onClick={() => downloadExport("md")}>Download .md</Button>
+                      <Button variant="outline" onClick={() => downloadExport("json")}>Download .json</Button>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
+            )}
+
+            {viewTarget && viewTarget.status === "failed" && (
+              <div className="bg-red-950/30 border border-red-800 rounded-lg p-4 mt-2">
+                <p className="font-mono text-xs text-red-300">{viewTarget.error}</p>
               </div>
             )}
           </div>
         )}
       </div>
 
-      <aside className="w-64 shrink-0 hidden lg:block">
-        <h3 className="font-mono text-xs text-text-dim uppercase tracking-wider mb-3">
-          Recent Scrapes
-        </h3>
+      <aside className="w-full lg:w-64 shrink-0">
+        <h3 className="text-xs font-medium text-text-muted uppercase tracking-wide mb-3">Recent scrapes</h3>
         <div className="space-y-2">
           {recentJobs.map((job) => (
             <button
               key={job.id}
-              onClick={() => setActiveJob(job)}
-              className="w-full text-left bg-panel border border-border rounded-lg p-3 hover:border-border-bright transition-colors"
+              onClick={() => selectJob(job)}
+              className={`w-full text-left bg-panel border rounded-lg p-3 transition-colors ${
+                activeJob?.id === job.id ? "border-accent-a" : "border-border hover:border-border-bright"
+              }`}
             >
               <p className="font-mono text-xs text-text-primary truncate">
                 {job.title || job.source_url}
               </p>
-              <p className="font-mono text-[10px] text-text-dim mt-1">{job.status}</p>
+              <p className="font-mono text-[10px] text-text-dim mt-1">
+                {job.status}
+                {job.is_batch && job.progress?.videos_total
+                  ? ` · ${job.progress.videos_done}/${job.progress.videos_total}`
+                  : ""}
+              </p>
             </button>
           ))}
-          {recentJobs.length === 0 && (
-            <p className="font-mono text-xs text-text-dim">No history yet</p>
-          )}
         </div>
       </aside>
     </div>

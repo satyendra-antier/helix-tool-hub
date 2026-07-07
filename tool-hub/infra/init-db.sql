@@ -15,8 +15,29 @@ CREATE TABLE IF NOT EXISTS video_scraper_jobs (
   transcript_source TEXT,
   summary_json JSONB,
   created_at TIMESTAMPTZ DEFAULT now(),
+  completed_at TIMESTAMPTZ,
+  is_batch BOOLEAN DEFAULT false,
+  progress_json JSONB
+);
+
+CREATE TABLE IF NOT EXISTS video_scraper_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id UUID NOT NULL REFERENCES video_scraper_jobs(id) ON DELETE CASCADE,
+  video_url TEXT NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'queued',
+  error TEXT,
+  title TEXT,
+  channel_or_author TEXT,
+  duration_seconds INT,
+  thumbnail_url TEXT,
+  transcript TEXT,
+  transcript_source TEXT,
+  summary_json JSONB,
+  created_at TIMESTAMPTZ DEFAULT now(),
   completed_at TIMESTAMPTZ
 );
+CREATE INDEX IF NOT EXISTS idx_video_scraper_items_job_id ON video_scraper_items(job_id);
 
 -- Market Depth tables
 CREATE TABLE IF NOT EXISTS market_depth_domains (
@@ -183,6 +204,7 @@ CREATE TABLE IF NOT EXISTS build_readiness_capabilities (
 CREATE TABLE IF NOT EXISTS build_readiness_verdicts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   profile_id UUID NOT NULL,
+  analysis_batch_id UUID,
   domain_id UUID,
   domain_name TEXT NOT NULL,
   track TEXT NOT NULL,
@@ -192,6 +214,8 @@ CREATE TABLE IF NOT EXISTS build_readiness_verdicts (
   verdict TEXT NOT NULL,
   verdict_json JSONB NOT NULL,
   citations JSONB DEFAULT '[]',
+  market_fetched_at TIMESTAMPTZ,
+  company_indexed_at TIMESTAMPTZ,
   analyzed_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -204,3 +228,73 @@ CREATE TABLE IF NOT EXISTS build_readiness_jobs (
   created_at TIMESTAMPTZ DEFAULT now(),
   completed_at TIMESTAMPTZ
 );
+
+CREATE TABLE IF NOT EXISTS build_readiness_index_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  profile_id UUID NOT NULL,
+  job_id UUID,
+  source_type TEXT NOT NULL,
+  pages_indexed INT DEFAULT 0,
+  chunks_indexed INT DEFAULT 0,
+  capabilities_found INT DEFAULT 0,
+  indexed_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS build_readiness_analysis_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  profile_id UUID NOT NULL,
+  job_id UUID,
+  market_fetched_at TIMESTAMPTZ,
+  company_indexed_at TIMESTAMPTZ,
+  domains_analyzed INT DEFAULT 0,
+  go_count INT DEFAULT 0,
+  analyzed_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Hub platform tables (auth, settings, pipeline, audit)
+CREATE TABLE IF NOT EXISTS hub_organizations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS hub_users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id UUID NOT NULL REFERENCES hub_organizations(id) ON DELETE CASCADE,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('admin', 'operator', 'viewer')),
+  active BOOLEAN DEFAULT true,
+  last_login_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_hub_users_org ON hub_users(org_id);
+
+CREATE TABLE IF NOT EXISTS hub_settings (
+  org_id UUID NOT NULL REFERENCES hub_organizations(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  value_jsonb NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (org_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS hub_pipeline_configs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id UUID NOT NULL REFERENCES hub_organizations(id) ON DELETE CASCADE,
+  template_id TEXT NOT NULL,
+  config_jsonb JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (org_id, template_id)
+);
+
+CREATE TABLE IF NOT EXISTS hub_audit_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id UUID NOT NULL REFERENCES hub_organizations(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES hub_users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  metadata_jsonb JSONB DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_hub_audit_org ON hub_audit_log(org_id, created_at DESC);

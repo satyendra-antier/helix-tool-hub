@@ -16,20 +16,26 @@ The output is a DRAFT for human review — it will never be sent automatically."
 
 
 def generate_outreach_draft(entity: dict, contacts: list[dict]) -> dict:
-    if not settings.openai_api_key:
+    from config import settings
+    if not settings.resolve_api_key():
         signal = entity.get("signal_type", "opportunity")
+        domain = entity.get("matched_domain") or "your space"
         return {
             "subject": f"Re: {entity.get('name', 'your project')}",
-            "body": f"I noticed your recent {signal} and thought there might be a fit. Happy to share how we've helped similar teams — would a brief call work?",
+            "body": f"I noticed your recent {signal} in {domain} and thought there might be a fit. Happy to share how we've helped similar teams — would a brief call work?",
             "cited_signal": entity.get("description", "")[:100],
         }
 
+    strengths = entity.get("our_strengths") or []
     input_data = {
         "entity": entity,
         "contacts": contacts,
-        "positioning_keywords": [
+        "positioning_keywords": strengths[:5] if strengths else [
             "blockchain security", "smart contract audit", "AI agent architecture",
         ],
+        "orientation": entity.get("orientation"),
+        "matched_domain": entity.get("matched_domain"),
+        "verdict": entity.get("verdict"),
     }
     return parse_json(
         chat(f"{OUTREACH_PROMPT}\n\nInput:\n{json.dumps(input_data, default=str)}", json_mode=True)

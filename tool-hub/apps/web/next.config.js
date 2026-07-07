@@ -9,6 +9,7 @@ const nextConfig = {
     "@tool-hub/video-scraper-frontend",
     "@tool-hub/market-depth-frontend",
     "@tool-hub/lead-intelligence-frontend",
+    "@tool-hub/build-readiness-frontend",
   ],
 };
 

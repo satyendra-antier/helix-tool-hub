@@ -122,7 +122,7 @@ def generate_narrative(
     landscapes: dict | None = None,
     retry_note: str = "",
 ) -> tuple[dict, bool, str]:
-    if not settings.openai_api_key:
+    if not settings.resolve_api_key():
         ranked = sorted(scores, key=lambda s: s.composite_score, reverse=True)
         return {
             "executive_summary": (

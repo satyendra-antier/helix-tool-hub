@@ -25,6 +25,9 @@ class LeadEntity(Base):
     signal_date = Column(Date)
     deadline = Column(Date)
     raw_payload = Column(JSONB)
+    lead_orientation = Column(String, default="generic")  # demand | future | generic
+    matched_domains = Column(JSONB, default=list)
+    domain_context = Column(JSONB, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -160,6 +163,16 @@ def run_migrations():
             stmt = stmt.strip()
             if stmt:
                 conn.execute(text(stmt))
+        conn.commit()
+        conn.execute(text(
+            "ALTER TABLE leads_entities ADD COLUMN IF NOT EXISTS lead_orientation TEXT DEFAULT 'generic'"
+        ))
+        conn.execute(text(
+            "ALTER TABLE leads_entities ADD COLUMN IF NOT EXISTS matched_domains JSONB DEFAULT '[]'"
+        ))
+        conn.execute(text(
+            "ALTER TABLE leads_entities ADD COLUMN IF NOT EXISTS domain_context JSONB DEFAULT '{}'"
+        ))
         conn.commit()
 
 

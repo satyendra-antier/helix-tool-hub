@@ -1,21 +1,31 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --bg: #0a0c10;
-  --panel: #12151c;
-  --panel-raised: #171b24;
-  --border: #232833;
-  --border-bright: #343b4a;
-  --text-primary: #e9ebf0;
-  --text-secondary: #8a91a3;
-  --text-dim: #545b6b;
-  --accent-a: #ff8a34;
-  --accent-b: #6e86ff;
-  --ok: #3ed598;
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-muted: #f4f4f5;
+  --border: #e4e4e7;
+  --border-bright: #d4d4d8;
+  --text-primary: #18181b;
+  --text-secondary: #71717a;
+  --text-muted: #a1a1aa;
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --success: #059669;
+  --warning: #d97706;
+  --danger: #dc2626;
+
+  /* Legacy aliases for gradual module migration */
+  --panel: var(--surface);
+  --panel-raised: var(--surface-muted);
+  --text-dim: var(--text-muted);
+  --accent-a: var(--warning);
+  --accent-b: var(--primary);
+  --ok: var(--success);
 }
 
 * {
@@ -23,19 +33,43 @@
 }
 
 body {
-  background:
-    radial-gradient(circle at 15% 0%, rgba(110, 134, 255, 0.06), transparent 40%),
-    radial-gradient(circle at 85% 20%, rgba(255, 138, 52, 0.05), transparent 45%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text-primary);
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
 .font-display {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
 }
 
 .font-mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Per-module accent overrides inside tool pages */
+.module-accent-scope .bg-primary {
+  background-color: var(--module-accent, var(--primary));
+}
+.module-accent-scope .hover\:bg-primary-hover:hover,
+.module-accent-scope .bg-primary-hover {
+  background-color: var(--primary-hover, var(--module-accent));
+}
+.module-accent-scope .text-primary {
+  color: var(--module-accent, var(--primary));
+}
+.module-accent-scope .border-primary\/30,
+.module-accent-scope .border-primary {
+  border-color: var(--module-accent-border, var(--module-accent));
+}
+.module-accent-scope .bg-primary\/10 {
+  background-color: var(--module-accent-muted);
+}
+.module-accent-scope .ring-primary\/20,
+.module-accent-scope .ring-primary\/30 {
+  --tw-ring-color: color-mix(in srgb, var(--module-accent) 30%, transparent);
+}
+.module-accent-scope .accent-strip {
+  border-left: 4px solid var(--module-accent);
 }

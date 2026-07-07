@@ -58,15 +58,39 @@ def _discover_links(base_url: str, html: str) -> list[str]:
     return links
 
 
+PRIORITY_PATH_SEGMENTS = [
+    "stablecoin", "payment", "defi", "blockchain", "web3", "tokenization",
+    "rwa", "real-world-asset", "ai", "llm", "machine-learning", "agent",
+    "smart-contract", "audit", "layer-2", "rollup", "tokenomics",
+]
+
+
+def _priority_urls(start_url: str) -> list[str]:
+    """Seed crawl queue with likely capability pages (stablecoin, RWA, AI, etc.)."""
+    base = _normalize_url(start_url)
+    parsed = urlparse(base)
+    root = f"{parsed.scheme}://{parsed.netloc}"
+    urls = [base]
+    for seg in PRIORITY_PATH_SEGMENTS:
+        urls.append(_normalize_url(f"{root}/{seg}"))
+        urls.append(_normalize_url(f"{root}/{seg}/"))
+    return list(dict.fromkeys(urls))
+
+
 def crawl_website(
     start_url: str,
     max_pages: int | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    *,
+    known_urls: set[str] | None = None,
 ) -> list[dict]:
     max_pages = max_pages or settings.max_crawl_pages
     start_url = _normalize_url(start_url)
     visited: set[str] = set()
-    queue: deque[str] = deque([start_url])
+    known_urls = known_urls or set()
+    queue: deque[str] = deque()
+    for u in _priority_urls(start_url):
+        queue.append(u)
     pages: list[dict] = []
 
     headers = {

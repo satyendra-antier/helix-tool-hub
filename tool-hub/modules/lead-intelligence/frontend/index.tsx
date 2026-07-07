@@ -2,10 +2,35 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
-  RadarChart, PolarGrid, PolarAngleAxis, Radar,
+  RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer,
 } from "recharts";
 import { useToolContext } from "@tool-hub/shared-types/src/tool-context";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  Textarea,
+  chartColors,
+  useToast,
+} from "@tool-hub/ui";
+
+type MatchedDomain = {
+  domain_name: string;
+  verdict?: string;
+  market_score?: number;
+  capability_score?: number;
+  matched_terms?: string[];
+};
 
 type Lead = {
   id: string;
@@ -18,8 +43,13 @@ type Lead = {
   signal_value?: number;
   deadline?: string;
   score: number;
-  breakdown: Record<string, number>;
+  breakdown: Record<string, number | string>;
   stage: string;
+  lead_orientation?: string;
+  matched_domains?: MatchedDomain[];
+  domain_context?: MatchedDomain;
+  portal_link?: string;
+  is_portal_lead?: boolean;
   outreach_draft?: { subject?: string; body?: string; cited_signal?: string };
   contacts: {
     full_name?: string;
@@ -30,14 +60,34 @@ type Lead = {
   }[];
 };
 
+type PipelineStatus = {
+  aligned_scoring: boolean;
+  can_discover: boolean;
+  stale_warning?: string;
+  orientations: {
+    demand: { label: string; description: string; domain_count: number; top_domains: string[] };
+    future: { label: string; description: string; domain_count: number; top_domains: string[] };
+  };
+  steps: { step: number; name: string; ready: boolean; stats?: Record<string, number> }[];
+  sync_keywords_preview?: string[];
+};
+
 const STAGES = ["new", "qualified", "contacted", "replied", "won", "lost"];
 const TRACKS = ["all", "government", "web3", "web2", "ai"] as const;
+const ORIENTATIONS = ["all", "demand", "future", "generic"] as const;
+
 const TRACK_COLORS: Record<string, string> = {
-  government: "#3ED598",
-  web3: "#FF8A34",
-  web2: "#6E86FF",
-  ai: "#C084FC",
-  growth: "#3ED598",
+  government: chartColors.success,
+  web3: chartColors.warning,
+  web2: chartColors.primary,
+  ai: chartColors.violet,
+  growth: chartColors.success,
+};
+
+const ORIENTATION_COLORS: Record<string, string> = {
+  demand: chartColors.success,
+  future: chartColors.warning,
+  generic: chartColors.muted,
 };
 
 const WEIGHT_LABELS: Record<string, string> = {
@@ -46,46 +96,76 @@ const WEIGHT_LABELS: Record<string, string> = {
   keyword_fit: "Keyword Fit",
   urgency: "Urgency",
   contact_confidence: "Contact Confidence",
+  market_demand_fit: "Market Demand",
+  capability_fit: "Capability Fit",
 };
 
 function daysRemaining(deadline?: string) {
   if (!deadline) return null;
-  const diff = Math.ceil((new Date(deadline).getTime() - Date.now()) / 86400000);
-  return diff;
+  return Math.ceil((new Date(deadline).getTime() - Date.now()) / 86400000);
+}
+
+function stripHtml(text?: string): string {
+  if (!text) return "";
+  if (!/[<&]/.test(text)) return text.replace(/\s+/g, " ").trim();
+  const doc = new DOMParser().parseFromString(text, "text/html");
+  return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
 }
 
 export default function LeadIntelligencePanel() {
   const { backendUrl } = useToolContext();
-  const apiBase =
-    typeof window !== "undefined"
-      ? backendUrl.replace("lead-intelligence-api", "localhost")
-      : backendUrl;
+  const apiBase = backendUrl;
+  const { toast } = useToast();
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [govLeads, setGovLeads] = useState<Lead[]>([]);
   const [trackFilter, setTrackFilter] = useState<string>("all");
+  const [orientationFilter, setOrientationFilter] = useState<string>("all");
   const [view, setView] = useState<"kanban" | "calendar" | "settings">("kanban");
   const [selected, setSelected] = useState<Lead | null>(null);
   const [discovering, setDiscovering] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus | null>(null);
   const [keywords, setKeywords] = useState("");
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [draftText, setDraftText] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(24);
+  const [totalLeads, setTotalLeads] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
 
   const loadLeads = useCallback(async () => {
-    const track = trackFilter === "all" ? "" : `?track=${trackFilter}`;
-    const [leadsRes, govRes, profileRes] = await Promise.all([
-      fetch(`${apiBase}/leads${track}`),
+    const params = new URLSearchParams();
+    if (trackFilter !== "all") params.set("track", trackFilter);
+    if (orientationFilter !== "all") params.set("orientation", orientationFilter);
+    params.set("page", String(page));
+    params.set("page_size", String(pageSize));
+    params.set("sort", "score");
+    const qs = `?${params}`;
+
+    const [leadsRes, govRes, profileRes, statusRes] = await Promise.all([
+      fetch(`${apiBase}/leads${qs}`),
       fetch(`${apiBase}/leads/government`),
       fetch(`${apiBase}/fit-profile`),
+      fetch(`${apiBase}/pipeline/status`),
     ]);
     const leadsData = await leadsRes.json();
     const govData = await govRes.json();
     const profile = await profileRes.json();
+    const status = await statusRes.json();
     setLeads(leadsData.leads || []);
+    setTotalLeads(leadsData.total ?? 0);
+    setTotalPages(leadsData.pages ?? 1);
     setGovLeads(govData.opportunities || []);
     setKeywords((profile.keywords || []).join(", "));
     setWeights(profile.weights || {});
-  }, [apiBase, trackFilter]);
+    setPipelineStatus(status);
+  }, [apiBase, trackFilter, orientationFilter, page, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [trackFilter, orientationFilter]);
 
   useEffect(() => {
     loadLeads();
@@ -98,17 +178,32 @@ export default function LeadIntelligencePanel() {
   }, [selected]);
 
   const handleDiscover = async () => {
+    setDiscoverError(null);
     setDiscovering(true);
-    const res = await fetch(`${apiBase}/discover`, { method: "POST" });
-    const data = await res.json();
-    const poll = setInterval(async () => {
-      const job = await (await fetch(`${apiBase}/jobs/${data.job_id}`)).json();
-      if (job.status === "done" || job.status === "failed") {
-        clearInterval(poll);
-        setDiscovering(false);
-        loadLeads();
-      }
-    }, 3000);
+    try {
+      const res = await fetch(`${apiBase}/discover`, { method: "POST" });
+      if (!res.ok) throw new Error("Discovery failed to start");
+      const data = await res.json();
+      const poll = setInterval(async () => {
+        const job = await (await fetch(`${apiBase}/jobs/${data.job_id}`)).json();
+        if (job.status === "done" || job.status === "failed") {
+          clearInterval(poll);
+          setDiscovering(false);
+          if (job.status === "failed") setDiscoverError(job.error || "Discovery failed");
+          loadLeads();
+        }
+      }, 3000);
+    } catch (e) {
+      setDiscovering(false);
+      setDiscoverError(e instanceof Error ? e.message : "Discovery failed");
+    }
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    await fetch(`${apiBase}/fit-profile/sync`, { method: "POST" });
+    setSyncing(false);
+    loadLeads();
   };
 
   const moveStage = async (leadId: string, stage: string) => {
@@ -132,6 +227,7 @@ export default function LeadIntelligencePanel() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ outreach_draft: JSON.stringify({ body: draftText }) }),
     });
+    toast("Draft saved", "success");
   };
 
   const saveFitProfile = async () => {
@@ -150,85 +246,153 @@ export default function LeadIntelligencePanel() {
     leads.filter((l) => l.stage === stage).sort((a, b) => b.score - a.score);
 
   const radarData = selected
-    ? Object.entries(selected.breakdown).map(([k, v]) => ({
-        metric: WEIGHT_LABELS[k] || k,
-        value: v,
-      }))
+    ? Object.entries(selected.breakdown)
+        .filter(([k, v]) => typeof v === "number")
+        .map(([k, v]) => ({
+          metric: WEIGHT_LABELS[k] || k,
+          value: v as number,
+        }))
     : [];
+
+  const showPagination = view === "kanban" && totalLeads > 0;
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center flex-wrap gap-3">
-        <div className="flex gap-1 border-b border-border">
-          {(["kanban", "calendar", "settings"] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={`font-mono text-xs px-4 py-2 capitalize border-b-2 -mb-px ${
-                view === v
-                  ? "border-[#3ED598] text-[#3ED598]"
-                  : "border-transparent text-text-dim hover:text-text-secondary"
-              }`}
-            >
-              {v === "calendar" ? "Gov Calendar" : v}
-            </button>
-          ))}
+      {discoverError && <Alert variant="danger" title="Discovery failed">{discoverError}</Alert>}
+      {pipelineStatus && (
+        <Card className="accent-strip">
+          <CardContent className="py-4 space-y-3">
+          <div className="flex justify-between items-start flex-wrap gap-3">
+            <div>
+              <p className="font-mono text-[10px] uppercase text-text-dim tracking-wider">
+                Market-aligned discovery
+              </p>
+              <p className="font-mono text-xs text-text-secondary mt-1">
+                {pipelineStatus.aligned_scoring
+                  ? "Demand + future orientation active — scoring uses Market Depth + Build Readiness"
+                  : "Partial alignment — refresh Market Depth and run Build Readiness for full scoring"}
+              </p>
+            </div>
+            <Button variant="outline" onClick={handleSync} disabled={syncing} size="sm">
+              {syncing ? "Syncing…" : "Sync from Build Readiness"}
+            </Button>
+          </div>
+
+          {pipelineStatus.stale_warning && (
+            <p className="font-mono text-xs text-accent-b border border-accent-b/30 rounded px-3 py-2">
+              {pipelineStatus.stale_warning}
+            </p>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {(["demand", "future"] as const).map((key) => {
+              const o = pipelineStatus.orientations[key];
+              return (
+                <div key={key} className="bg-panel-raised border border-border rounded p-3">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ background: ORIENTATION_COLORS[key] }}
+                    />
+                    <span className="font-mono text-xs text-text-primary">{o.label}</span>
+                    <span className="font-mono text-[10px] text-text-dim ml-auto">
+                      {o.domain_count} domains
+                    </span>
+                  </div>
+                  <p className="font-mono text-[10px] text-text-dim mt-1">{o.description}</p>
+                  {o.top_domains.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {o.top_domains.map((d) => (
+                        <span
+                          key={d}
+                          className="font-mono text-[9px] px-1.5 py-0.5 rounded border"
+                          style={{
+                            color: ORIENTATION_COLORS[key],
+                            borderColor: `${ORIENTATION_COLORS[key]}40`,
+                          }}
+                        >
+                          {d}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Tabs value={view} onValueChange={(v) => setView(v as typeof view)}>
+        <div className="flex justify-between items-center flex-wrap gap-3">
+          <TabsList>
+            <TabsTrigger value="kanban">Kanban</TabsTrigger>
+            <TabsTrigger value="calendar">Gov calendar</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
+          </TabsList>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <a href={`${apiBase}/export/csv`}>Export CSV</a>
+            </Button>
+            <Button onClick={handleDiscover} disabled={discovering}>
+              {discovering ? "Discovering…" : "Run discovery"}
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <a
-            href={`${apiBase}/export/csv`}
-            className="font-mono text-xs border border-border px-3 py-2 rounded hover:border-text-primary"
-          >
-            Export CSV
-          </a>
-          <button
-            onClick={handleDiscover}
-            disabled={discovering}
-            className="font-mono text-sm bg-[#3ED598] text-bg px-5 py-2 rounded-lg disabled:opacity-40"
-          >
-            {discovering ? "Discovering…" : "Run Discovery"}
-          </button>
-        </div>
-      </div>
 
       {view !== "settings" && (
-        <div className="flex gap-1 flex-wrap">
-          {TRACKS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTrackFilter(t)}
-              className={`font-mono text-[10px] uppercase px-3 py-1 rounded border ${
-                trackFilter === t
-                  ? "border-[#3ED598] text-[#3ED598] bg-[#3ED598]/10"
-                  : "border-border text-text-dim"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
+        <div className="space-y-2">
+          <div className="flex gap-1 flex-wrap">
+            {TRACKS.map((t) => (
+              <button
+                key={t}
+                onClick={() => setTrackFilter(t)}
+                className={`text-xs uppercase px-3 py-1 rounded-lg border ${
+                  trackFilter === t
+                    ? "border-primary text-primary bg-primary/10"
+                    : "border-border text-text-muted"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1 flex-wrap items-center">
+            <span className="font-mono text-[10px] text-text-dim uppercase mr-1">Orientation</span>
+            {ORIENTATIONS.map((o) => (
+              <button
+                key={o}
+                onClick={() => setOrientationFilter(o)}
+                className={`text-xs uppercase px-3 py-1 rounded-lg border ${
+                  orientationFilter === o
+                    ? "border-warning text-warning bg-warning/10"
+                    : "border-border text-text-muted"
+                }`}
+              >
+                {o}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
-      {view === "kanban" && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 overflow-x-auto">
+      <TabsContent value="kanban">
+        <div className="flex gap-3 overflow-x-auto pb-2">
           {STAGES.map((stage) => (
-            <div key={stage} className="bg-panel border border-border rounded-lg p-3 min-w-[160px]">
-              <h3 className="font-mono text-[10px] uppercase text-text-dim mb-3 tracking-wider">
-                {stage}
-              </h3>
+            <div key={stage} className="bg-surface border border-border rounded-xl p-3 min-w-[180px] flex-1">
+              <h3 className="text-xs uppercase text-text-muted mb-3 font-medium">{stage}</h3>
               <div className="space-y-2">
                 {leadsByStage(stage).map((lead) => (
                   <button
                     key={lead.id}
                     onClick={() => setSelected(lead)}
-                    draggable
-                    onDragEnd={() => {}}
                     className="w-full text-left bg-panel-raised border border-border rounded p-2 hover:border-border-bright transition-colors"
                   >
                     <p className="font-mono text-xs text-text-primary truncate">{lead.name}</p>
-                    <div className="flex justify-between items-center mt-1">
+                    <div className="flex justify-between items-center mt-1 gap-1">
                       <span
-                        className="font-mono text-[9px] uppercase px-1.5 py-0.5 rounded"
+                        className="font-mono text-[9px] uppercase px-1.5 py-0.5 rounded shrink-0"
                         style={{
                           color: TRACK_COLORS[lead.track],
                           border: `1px solid ${TRACK_COLORS[lead.track]}40`,
@@ -238,6 +402,23 @@ export default function LeadIntelligencePanel() {
                       </span>
                       <span className="font-mono text-[10px] text-text-dim">{lead.score.toFixed(0)}</span>
                     </div>
+                    {lead.lead_orientation && lead.lead_orientation !== "generic" && (
+                      <span
+                        className="font-mono text-[8px] uppercase px-1 py-0.5 rounded mt-1 inline-block"
+                        style={{
+                          color: ORIENTATION_COLORS[lead.lead_orientation],
+                          background: `${ORIENTATION_COLORS[lead.lead_orientation]}15`,
+                        }}
+                      >
+                        {lead.lead_orientation}
+                      </span>
+                    )}
+                    {lead.domain_context?.domain_name && (
+                      <p className="font-mono text-[8px] text-text-dim mt-0.5 truncate">
+                        {lead.domain_context.domain_name}
+                        {lead.domain_context.verdict ? ` · ${lead.domain_context.verdict}` : ""}
+                      </p>
+                    )}
                     <p className="font-mono text-[9px] text-text-dim mt-1 truncate">
                       {lead.signal_type} · {lead.source}
                     </p>
@@ -247,9 +428,36 @@ export default function LeadIntelligencePanel() {
             </div>
           ))}
         </div>
+      </TabsContent>
+
+      {showPagination && view === "kanban" && (
+        <div className="flex flex-wrap justify-between items-center gap-3 border-t border-border pt-4">
+          <p className="font-mono text-xs text-text-dim">
+            {totalLeads} leads · page {page} of {totalPages}
+            <span className="ml-2 text-text-dim/70">(sorted by score)</span>
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="font-mono text-xs border border-border px-3 py-1.5 rounded disabled:opacity-40 hover:border-text-primary"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="font-mono text-xs border border-border px-3 py-1.5 rounded disabled:opacity-40 hover:border-text-primary"
+            >
+              Next
+            </button>
+          </div>
+        </div>
       )}
 
-      {view === "calendar" && (
+      <TabsContent value="calendar">
         <div className="space-y-2">
           {govLeads.length === 0 ? (
             <p className="font-mono text-sm text-text-dim text-center py-12">
@@ -267,7 +475,10 @@ export default function LeadIntelligencePanel() {
                 >
                   <div>
                     <p className="font-display text-sm font-medium">{lead.name}</p>
-                    <p className="font-mono text-xs text-text-dim mt-1">{lead.source} · score {lead.score.toFixed(0)}</p>
+                    <p className="font-mono text-xs text-text-dim mt-1">
+                      {lead.source} · score {lead.score.toFixed(0)}
+                      {lead.lead_orientation ? ` · ${lead.lead_orientation}` : ""}
+                    </p>
                   </div>
                   {days !== null && (
                     <span
@@ -285,9 +496,9 @@ export default function LeadIntelligencePanel() {
             })
           )}
         </div>
-      )}
+      </TabsContent>
 
-      {view === "settings" && (
+      <TabsContent value="settings">
         <div className="bg-panel border border-border rounded-lg p-6 space-y-6 max-w-xl">
           <div>
             <label className="font-mono text-xs text-text-dim uppercase block mb-2">
@@ -299,6 +510,9 @@ export default function LeadIntelligencePanel() {
               rows={4}
               className="w-full bg-panel-raised border border-border rounded p-3 font-mono text-sm text-text-primary"
             />
+            <p className="font-mono text-[10px] text-text-dim mt-2">
+              Use &quot;Sync from Build Readiness&quot; to auto-fill from GO + future domains.
+            </p>
           </div>
           <div className="space-y-3">
             <p className="font-mono text-xs text-text-dim uppercase">Scoring Weights</p>
@@ -315,64 +529,110 @@ export default function LeadIntelligencePanel() {
                   step={0.05}
                   value={v}
                   onChange={(e) => setWeights({ ...weights, [k]: parseFloat(e.target.value) })}
-                  className="w-full accent-[#3ED598]"
+                  className="w-full accent-primary"
                 />
               </div>
             ))}
           </div>
-          <button
-            onClick={saveFitProfile}
-            className="font-mono text-sm bg-[#3ED598] text-bg px-5 py-2 rounded-lg"
-          >
-            Save & Re-score
-          </button>
+          <Button onClick={saveFitProfile}>Save & re-score</Button>
         </div>
-      )}
+      </TabsContent>
+      </Tabs>
 
-      {selected && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setSelected(null)} />
-          <div className="relative w-full max-w-lg bg-panel border-l border-border h-full overflow-y-auto p-6">
-            <button
-              onClick={() => setSelected(null)}
-              className="font-mono text-xs text-text-dim hover:text-text-primary mb-4"
-            >
-              Close
-            </button>
-            <h2 className="font-display text-xl font-semibold">{selected.name}</h2>
-            <span
-              className="font-mono text-[10px] uppercase px-2 py-0.5 rounded border mt-2 inline-block"
-              style={{ color: TRACK_COLORS[selected.track], borderColor: `${TRACK_COLORS[selected.track]}40` }}
-            >
-              {selected.track} · {selected.score.toFixed(1)}
-            </span>
-            <p className="text-text-secondary text-sm mt-4 leading-relaxed">{selected.description}</p>
+      <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
+        <SheetContent>
+          {selected && (
+            <>
+              <SheetHeader>
+                <SheetTitle>{selected.name}</SheetTitle>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <Badge variant="outline" style={{ color: TRACK_COLORS[selected.track], borderColor: TRACK_COLORS[selected.track] }}>
+                    {selected.track} · {selected.score.toFixed(1)}
+                  </Badge>
+                  {selected.lead_orientation && (
+                    <Badge variant="outline" style={{ color: ORIENTATION_COLORS[selected.lead_orientation] }}>
+                      {selected.lead_orientation}-oriented
+                    </Badge>
+                  )}
+                </div>
+              </SheetHeader>
+
+            {selected.domain_context?.domain_name && (
+              <div className="mt-4 bg-panel-raised border border-border rounded p-3">
+                <p className="font-mono text-[10px] text-text-dim uppercase">Matched Domain</p>
+                <p className="font-mono text-sm text-text-primary mt-1">
+                  {selected.domain_context.domain_name}
+                </p>
+                <div className="flex gap-3 mt-2 font-mono text-[10px] text-text-dim">
+                  {selected.domain_context.verdict && (
+                    <span>Verdict: {selected.domain_context.verdict}</span>
+                  )}
+                  {selected.domain_context.market_score != null && (
+                    <span>Market: {selected.domain_context.market_score}</span>
+                  )}
+                  {selected.domain_context.capability_score != null && (
+                    <span>Capability: {selected.domain_context.capability_score}</span>
+                  )}
+                </div>
+                {selected.domain_context.matched_terms && selected.domain_context.matched_terms.length > 0 && (
+                  <p className="font-mono text-[10px] text-text-dim mt-2">
+                    Terms: {selected.domain_context.matched_terms.join(", ")}
+                  </p>
+                )}
+              </div>
+            )}
+
+            <p className="text-text-secondary text-sm mt-4 leading-relaxed">
+              {stripHtml(selected.description)}
+            </p>
 
             <div className="mt-6">
               <h3 className="font-mono text-xs text-text-dim uppercase mb-2">Score Breakdown</h3>
               <ResponsiveContainer width="100%" height={180}>
                 <RadarChart data={radarData}>
-                  <PolarGrid stroke="#232833" />
-                  <PolarAngleAxis dataKey="metric" tick={{ fill: "#8A91A3", fontSize: 9 }} />
-                  <Radar dataKey="value" stroke="#3ED598" fill="#3ED598" fillOpacity={0.2} />
+                  <PolarGrid stroke="#e4e4e7" />
+                  <PolarAngleAxis dataKey="metric" tick={{ fill: chartColors.muted, fontSize: 9 }} />
+                  <Radar dataKey="value" stroke={chartColors.success} fill={chartColors.success} fillOpacity={0.2} />
                 </RadarChart>
               </ResponsiveContainer>
             </div>
 
             <div className="mt-4">
               <h3 className="font-mono text-xs text-text-dim uppercase mb-2">Contacts</h3>
-              {selected.contacts.map((c, i) => (
-                <div key={i} className="border border-border rounded p-2 mb-2 font-mono text-xs">
-                  <p className="text-text-primary">{c.full_name || "—"} · {c.role_title}</p>
-                  <p className="text-text-secondary">{c.email}</p>
-                  <div className="flex gap-2 mt-1">
-                    {c.email_verified && (
-                      <span className="text-ok text-[10px]">verified ✓</span>
-                    )}
-                    <span className="text-text-dim text-[10px]">{c.consent_basis}</span>
-                  </div>
+              {selected.contacts.length === 0 ? (
+                <div className="border border-border rounded p-3 font-mono text-xs text-text-secondary">
+                  {selected.is_portal_lead || selected.track === "government" ? (
+                    <>
+                      <p>No direct email — this is a government portal opportunity.</p>
+                      {selected.portal_link && (
+                        <a
+                          href={selected.portal_link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-accent-b underline mt-2 inline-block"
+                        >
+                          Open on {selected.domain || "portal"} →
+                        </a>
+                      )}
+                    </>
+                  ) : (
+                    <p>No verified contacts yet. Re-run discovery after adding Apollo/Hunter keys, or qualify manually.</p>
+                  )}
                 </div>
-              ))}
+              ) : (
+                selected.contacts.map((c, i) => (
+                  <div key={i} className="border border-border rounded p-2 mb-2 font-mono text-xs">
+                    <p className="text-text-primary">{c.full_name || "—"} · {c.role_title}</p>
+                    <p className="text-text-secondary">{c.email}</p>
+                    <div className="flex gap-2 mt-1">
+                      {c.email_verified && (
+                        <span className="text-ok text-[10px]">verified ✓</span>
+                      )}
+                      <span className="text-text-dim text-[10px]">{c.consent_basis}</span>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
 
             <div className="mt-6">
@@ -384,25 +644,15 @@ export default function LeadIntelligencePanel() {
                   Signal: {selected.outreach_draft.cited_signal}
                 </p>
               )}
-              <textarea
+              <Textarea
                 value={draftText}
                 onChange={(e) => setDraftText(e.target.value)}
                 rows={6}
-                className="w-full bg-panel-raised border border-border rounded p-3 font-mono text-xs text-text-secondary"
+                className="font-mono text-xs"
               />
               <div className="flex gap-2 mt-3">
-                <button
-                  onClick={() => saveDraft(selected.id)}
-                  className="font-mono text-xs border border-border px-3 py-1.5 rounded"
-                >
-                  Save Draft
-                </button>
-                <button
-                  onClick={() => markSent(selected.id)}
-                  className="font-mono text-xs bg-text-primary text-bg px-3 py-1.5 rounded"
-                >
-                  Mark as Sent
-                </button>
+                <Button variant="outline" size="sm" onClick={() => saveDraft(selected.id)}>Save draft</Button>
+                <Button size="sm" onClick={() => markSent(selected.id)}>Mark as sent</Button>
               </div>
               <p className="font-mono text-[10px] text-text-dim mt-2">
                 No auto-send — you must explicitly mark as sent.
@@ -411,18 +661,15 @@ export default function LeadIntelligencePanel() {
 
             <div className="mt-4 flex gap-1 flex-wrap">
               {STAGES.filter((s) => s !== selected.stage).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => moveStage(selected.id, s)}
-                  className="font-mono text-[10px] border border-border px-2 py-1 rounded hover:border-text-primary"
-                >
+                <Button key={s} variant="outline" size="sm" onClick={() => moveStage(selected.id, s)}>
                   → {s}
-                </button>
+                </Button>
               ))}
             </div>
-          </div>
-        </div>
-      )}
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
