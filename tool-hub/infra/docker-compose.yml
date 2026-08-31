@@ -171,6 +171,7 @@ services:
       HUNTER_API_KEY: ${HUNTER_API_KEY:-}
       SAM_GOV_API_KEY: ${SAM_GOV_API_KEY:-}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-toolhub-dev-secret}
+      # Must be the public origin users hit; wrong value makes logout/login bounce to localhost
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3200}
       HUB_ADMIN_PASSWORD: ${HUB_ADMIN_PASSWORD:-admin123}
     ports:

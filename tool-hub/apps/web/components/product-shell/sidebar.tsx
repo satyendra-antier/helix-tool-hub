@@ -154,7 +154,12 @@ function SidebarContent({
           variant="outline"
           size="sm"
           className="w-full justify-start gap-2"
-          onClick={() => signOut({ callbackUrl: "/login" })}
+          onClick={() => {
+            // Avoid NextAuth prefixing callback with NEXTAUTH_URL (often localhost in misconfigured deploys).
+            void signOut({ redirect: false }).then(() => {
+              window.location.assign("/login");
+            });
+          }}
         >
           <LogOut className="h-3.5 w-3.5" />
           Sign out

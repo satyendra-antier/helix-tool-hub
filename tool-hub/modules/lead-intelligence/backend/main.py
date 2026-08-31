@@ -286,14 +286,17 @@ def list_leads(
 
 
 @app.get("/leads/government")
-def government_calendar(db: Session = Depends(get_db)):
+def government_calendar(limit: int = 50, db: Session = Depends(get_db)):
+    """Bounded calendar — avoid unbounded N+1 that hangs the UI."""
+    limit = max(1, min(limit, 100))
     entities = (
         db.query(LeadEntity)
         .filter(LeadEntity.track == "government")
         .order_by(LeadEntity.deadline.asc().nullslast())
+        .limit(limit)
         .all()
     )
-    return {"opportunities": [entity_to_dict(e, db) for e in entities]}
+    return {"opportunities": [entity_to_dict(e, db) for e in entities], "limit": limit}
 
 
 @app.get("/leads/{entity_id}")

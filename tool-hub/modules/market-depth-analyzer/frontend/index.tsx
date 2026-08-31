@@ -259,15 +259,21 @@ export default function MarketDepthPanel() {
                   <CardTitle>Executive summary</CardTitle>
                   {validationPassed !== null && (
                     <Badge variant={validationPassed ? "success" : "warning"}>
-                      {validationPassed ? "Validated" : "Flagged"}
+                      {validationPassed ? "Validated" : "AI narrative suppressed"}
                     </Badge>
                   )}
                 </div>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-text-secondary leading-relaxed">{report.executive_summary}</p>
-                {validationNotes && !validationPassed && (
-                  <p className="text-xs text-warning mt-2">{validationNotes}</p>
+                {validationPassed === false ? (
+                  <>
+                    <Alert variant="warning" title="Not published as validated signal" className="mb-3">
+                      {validationNotes || "Invented or uncited numbers detected. Showing score-only fallback."}
+                    </Alert>
+                    <p className="text-sm text-text-secondary leading-relaxed">{report.executive_summary}</p>
+                  </>
+                ) : (
+                  <p className="text-sm text-text-secondary leading-relaxed">{report.executive_summary}</p>
                 )}
               </CardContent>
             </Card>
@@ -327,12 +333,16 @@ export default function MarketDepthPanel() {
       )}
 
       {report?.confidence_flags && report.confidence_flags.length > 0 && (
-        <div className="bg-yellow-950/20 border border-yellow-800/50 rounded-lg p-4">
-          <p className="font-mono text-xs text-yellow-400 uppercase mb-2">Confidence Flags</p>
-          {report.confidence_flags.map((f, i) => (
-            <p key={i} className="font-mono text-xs text-yellow-300/80"><b>{f.domain}:</b> {f.reason}</p>
-          ))}
-        </div>
+        <Alert variant="warning" title="Confidence Flags" className="mb-2">
+          <div className="space-y-2 mt-1">
+            {report.confidence_flags.map((f, i) => (
+              <p key={i} className="font-mono text-xs leading-relaxed text-zinc-800">
+                <span className="font-semibold text-amber-700">{f.domain}:</span>{" "}
+                {f.reason}
+              </p>
+            ))}
+          </div>
+        </Alert>
       )}
 
       {/* Chart + weights */}
@@ -557,7 +567,7 @@ export default function MarketDepthPanel() {
                       {typeof v.raw_data?.methodology === "string" && (
                         <p className="text-text-dim text-[10px] mt-1 leading-relaxed">{v.raw_data.methodology}</p>
                       )}
-                      {v.note && <p className="text-yellow-500/80 text-[10px] mt-1">{v.note}</p>}
+                      {v.note && <p className="text-warning text-[10px] mt-1 leading-relaxed">{v.note}</p>}
                     </div>
                   ))}
                 </div>

@@ -62,11 +62,24 @@ def _serialize_scores(scores: list, landscapes: dict | None = None) -> dict:
     }
 
 
+def _normalize_number_token(raw: str) -> str | None:
+    token = raw.replace(",", "").strip().rstrip(".")
+    if not token:
+        return None
+    try:
+        float(token)
+    except ValueError:
+        return None
+    return token
+
+
 def _extract_numbers(text: str) -> set[str]:
-    """Extract numeric tokens, normalizing formats like 1,234.56."""
+    """Extract numeric tokens, normalizing formats like 1,234.56 and trailing periods."""
     found = set()
     for match in re.findall(r"\d[\d,.]*", text):
-        normalized = match.replace(",", "")
+        normalized = _normalize_number_token(match)
+        if not normalized:
+            continue
         found.add(normalized)
         try:
             val = float(normalized)
@@ -75,6 +88,44 @@ def _extract_numbers(text: str) -> set[str]:
         except ValueError:
             pass
     return found
+
+
+def _deterministic_summary(scores: list, notes: str) -> dict:
+    ranked = sorted(scores, key=lambda s: s.composite_score, reverse=True)
+    top = ranked[:3]
+    lines = [
+        f"{s.domain} ({s.composite_score}/100)" for s in top
+    ]
+    return {
+        "executive_summary": (
+            "Deterministic ranking from live signals (AI narrative withheld — validation failed). "
+            + "Top domains: "
+            + "; ".join(lines)
+            + "."
+        ),
+        "domain_narratives": [
+            {
+                "domain": s.domain,
+                "narrative": (
+                    f"Composite score {s.composite_score}/100 from available market signals. "
+                    "Open the domain detail for evidence — no free-form AI prose."
+                ),
+                "product_focus": "",
+                "cited_metrics": [str(s.composite_score)],
+            }
+            for s in top
+        ],
+        "confidence_flags": [
+            {"domain": "all", "reason": f"Narrative suppressed: {notes}"},
+            *[
+                {
+                    "domain": s.domain,
+                    "reason": f"signals_available may be thin — inspect components for {s.domain}",
+                }
+                for s in top
+            ],
+        ],
+    }
 
 
 def validate_narrative(input_data: dict, output: dict) -> tuple[bool, str]:
@@ -148,5 +199,9 @@ def generate_narrative(
         text2 = chat(f"{prompt}\n\n{retry_prompt}", json_mode=True)
         output = parse_json(text2)
         passed, notes = validate_narrative(input_data, output)
+
+    # Never publish a failed narrative under "Real signal" — fall back to scores only.
+    if not passed:
+        return _deterministic_summary(scores, notes), False, notes
 
     return output, passed, notes

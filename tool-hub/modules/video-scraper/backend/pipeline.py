@@ -189,6 +189,12 @@ def _run_batch(job: VideoScraperJob, job_id: str, video_urls: list[str], db: Ses
             item.error = str(exc)
             item.completed_at = datetime.utcnow()
             db.commit()
+        # Commit live progress so the UI can open finished videos mid-batch.
+        db.refresh(item)
+        for other in items:
+            db.refresh(other)
+        _update_batch_progress(job, items, item)
+        db.commit()
 
     db.refresh(job)
     for item in items:

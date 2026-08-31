@@ -275,7 +275,7 @@ CREATE INDEX IF NOT EXISTS idx_hub_users_org ON hub_users(org_id);
 CREATE TABLE IF NOT EXISTS hub_settings (
   org_id UUID NOT NULL REFERENCES hub_organizations(id) ON DELETE CASCADE,
   key TEXT NOT NULL,
-  value_jsonb NOT NULL DEFAULT '{}',
+  value_jsonb JSONB NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (org_id, key)
 );

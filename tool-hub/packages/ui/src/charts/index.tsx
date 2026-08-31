@@ -60,7 +60,7 @@ export function HorizontalBarChartCard({
         <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" />
           <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11 }} />
-          <YAxis type="category" dataKey={nameKey} width={120} tick={{ fontSize: 11 }} />
+          <YAxis type="category" dataKey={nameKey} width={140} tick={{ fontSize: 10 }} interval={0} />
           <Tooltip />
           <Bar dataKey={dataKey} fill={chartColors.primary} radius={[0, 4, 4, 0]} />
         </BarChart>

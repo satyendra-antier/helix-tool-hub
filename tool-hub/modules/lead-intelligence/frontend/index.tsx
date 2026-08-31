@@ -20,6 +20,7 @@ import {
   TabsList,
   TabsTrigger,
   Textarea,
+  EmptyState,
   chartColors,
   useToast,
 } from "@tool-hub/ui";
@@ -134,6 +135,18 @@ export default function LeadIntelligencePanel() {
   const [totalLeads, setTotalLeads] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [discoverError, setDiscoverError] = useState<string | null>(null);
+  const [leadsLoading, setLeadsLoading] = useState(true);
+  const [leadsError, setLeadsError] = useState<string | null>(null);
+
+  const fetchWithTimeout = async (url: string, ms = 15000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+      return await fetch(url, { signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   const loadLeads = useCallback(async () => {
     const params = new URLSearchParams();
@@ -144,24 +157,50 @@ export default function LeadIntelligencePanel() {
     params.set("sort", "score");
     const qs = `?${params}`;
 
-    const [leadsRes, govRes, profileRes, statusRes] = await Promise.all([
-      fetch(`${apiBase}/leads${qs}`),
-      fetch(`${apiBase}/leads/government`),
-      fetch(`${apiBase}/fit-profile`),
-      fetch(`${apiBase}/pipeline/status`),
-    ]);
-    const leadsData = await leadsRes.json();
-    const govData = await govRes.json();
-    const profile = await profileRes.json();
-    const status = await statusRes.json();
-    setLeads(leadsData.leads || []);
-    setTotalLeads(leadsData.total ?? 0);
-    setTotalPages(leadsData.pages ?? 1);
-    setGovLeads(govData.opportunities || []);
-    setKeywords((profile.keywords || []).join(", "));
-    setWeights(profile.weights || {});
-    setPipelineStatus(status);
+    setLeadsLoading(true);
+    setLeadsError(null);
+    try {
+      // Do NOT load /leads/government here — it N+1s every gov entity and hangs the Kanban.
+      const [leadsRes, profileRes, statusRes] = await Promise.all([
+        fetchWithTimeout(`${apiBase}/leads${qs}`),
+        fetchWithTimeout(`${apiBase}/fit-profile`, 10000),
+        fetchWithTimeout(`${apiBase}/pipeline/status`, 10000),
+      ]);
+      if (!leadsRes.ok) throw new Error(`Leads API failed (${leadsRes.status})`);
+      const leadsData = await leadsRes.json();
+      const profile = profileRes.ok ? await profileRes.json() : {};
+      const status = statusRes.ok ? await statusRes.json() : null;
+      setLeads(leadsData.leads || []);
+      setTotalLeads(leadsData.total ?? 0);
+      setTotalPages(leadsData.pages ?? 1);
+      setKeywords((profile.keywords || []).join(", "));
+      setWeights(profile.weights || {});
+      setPipelineStatus(status);
+    } catch (e) {
+      setLeads([]);
+      setTotalLeads(0);
+      setLeadsError(
+        e instanceof Error && e.name === "AbortError"
+          ? "Leads API timed out — backend may be overloaded (N+1 queries)."
+          : e instanceof Error
+            ? e.message
+            : "Failed to load leads"
+      );
+    } finally {
+      setLeadsLoading(false);
+    }
   }, [apiBase, trackFilter, orientationFilter, page, pageSize]);
+
+  const loadGovLeads = useCallback(async () => {
+    try {
+      const govRes = await fetchWithTimeout(`${apiBase}/leads/government?limit=50`, 15000);
+      if (!govRes.ok) throw new Error(`Government calendar failed (${govRes.status})`);
+      const govData = await govRes.json();
+      setGovLeads(govData.opportunities || []);
+    } catch {
+      setGovLeads([]);
+    }
+  }, [apiBase]);
 
   useEffect(() => {
     setPage(1);
@@ -170,6 +209,10 @@ export default function LeadIntelligencePanel() {
   useEffect(() => {
     loadLeads();
   }, [loadLeads]);
+
+  useEffect(() => {
+    if (view === "calendar") loadGovLeads();
+  }, [view, loadGovLeads]);
 
   useEffect(() => {
     if (selected?.outreach_draft?.body) {
@@ -324,6 +367,15 @@ export default function LeadIntelligencePanel() {
         </Card>
       )}
 
+      {leadsError && (
+        <Alert variant="danger" title="Leads failed to load" className="mb-2">
+          {leadsError} This is not an empty pipeline — the request failed.
+        </Alert>
+      )}
+      {leadsLoading && !leadsError && (
+        <p className="text-sm text-text-secondary mb-2">Loading leads…</p>
+      )}
+
       <Tabs value={view} onValueChange={(v) => setView(v as typeof view)}>
         <div className="flex justify-between items-center flex-wrap gap-3">
           <TabsList>
@@ -378,6 +430,13 @@ export default function LeadIntelligencePanel() {
       )}
 
       <TabsContent value="kanban">
+          {!leadsLoading && !leadsError && totalLeads === 0 && (
+            <EmptyState
+              title="No leads in pipeline"
+              description="Run discovery to pull government, hiring, and funding signals — or check filters."
+            />
+          )}
+
         <div className="flex gap-3 overflow-x-auto pb-2">
           {STAGES.map((stage) => (
             <div key={stage} className="bg-surface border border-border rounded-xl p-3 min-w-[180px] flex-1">

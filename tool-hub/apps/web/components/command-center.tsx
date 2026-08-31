@@ -9,6 +9,7 @@ import {
   Workflow,
 } from "lucide-react";
 import {
+  Alert,
   Button,
   Card,
   CardContent,
@@ -24,9 +25,17 @@ import {
 
 type HubStatus = {
   generatedAt: string;
+  dataAsOf?: string | null;
+  freshness?: {
+    marketAt?: string | null;
+    companyDepthAt?: string | null;
+    fitVerdictAt?: string | null;
+    staleWarning?: string | null;
+    fitAgeDays?: number | null;
+  };
   kpis: {
     topDomain: { name: string; score: number } | null;
-    goVerdicts: { go: number; conditional: number; noGo: number; total: number };
+    goVerdicts: { go: number; conditional: number; noGo: number; total: number; asOf?: string | null };
     leadsInPipeline: number;
     proofAssets: { pages: number; chunks: number; capabilities: number; videos: number };
     marketFetchedAt: string | null;
@@ -133,9 +142,18 @@ export function CommandCenter() {
       />
 
       <p className="text-xs text-text-muted">
-        Last updated {new Date(data.generatedAt).toLocaleString()}
-        {data.kpis.marketFetchedAt ? ` · Market data ${new Date(data.kpis.marketFetchedAt).toLocaleDateString()}` : ""}
+        Data as of{" "}
+        {data.dataAsOf
+          ? new Date(data.dataAsOf).toLocaleString()
+          : "— (no module timestamps yet)"}
+        <span className="text-text-dim"> · dashboard refreshed {new Date(data.generatedAt).toLocaleString()}</span>
       </p>
+
+      {data.freshness?.staleWarning && (
+        <Alert variant="warning" title="Stale intelligence">
+          {data.freshness.staleWarning}
+        </Alert>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
@@ -149,7 +167,15 @@ export function CommandCenter() {
           <CardContent className="pt-5">
             <p className="text-xs text-text-muted uppercase tracking-wide">GO verdicts</p>
             <p className="text-2xl font-semibold mt-1">{data.kpis.goVerdicts.go}</p>
-            <p className="text-sm text-text-secondary">of {data.kpis.goVerdicts.total || 12} domains analyzed</p>
+            <p className="text-sm text-text-secondary">
+              of {data.kpis.goVerdicts.total || 12} domains
+              {data.kpis.goVerdicts.asOf
+                ? ` · analyzed ${new Date(data.kpis.goVerdicts.asOf).toLocaleDateString()}`
+                : ""}
+              {data.kpis.goVerdicts.noGo === 0 && data.kpis.goVerdicts.total > 0
+                ? " · 0 NO_GO"
+                : ""}
+            </p>
           </CardContent>
         </Card>
         <Card>

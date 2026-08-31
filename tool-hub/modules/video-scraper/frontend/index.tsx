@@ -17,6 +17,7 @@ import {
   TabsTrigger,
   useToast,
 } from "@tool-hub/ui";
+import { buildScrapePdf } from "./pdf-export";
 
 const ACTIVE_JOB_KEY = "toolhub.videoScraper.activeJobId";
 const TERMINAL_STATUSES = new Set(["done", "partial", "failed"]);
@@ -132,6 +133,7 @@ export default function VideoScraperPanel() {
   const [recentJobs, setRecentJobs] = useState<Job[]>([]);
   const [tab, setTab] = useState<"overview" | "summary" | "transcript" | "export">("overview");
   const [loading, setLoading] = useState(false);
+  const [restoring, setRestoring] = useState(true);
   const [showCompleteBanner, setShowCompleteBanner] = useState(false);
   const prevStatusRef = useRef<string | null>(null);
 
@@ -158,22 +160,67 @@ export default function VideoScraperPanel() {
   };
 
   useEffect(() => {
-    fetchRecent();
-    const saved = localStorage.getItem(ACTIVE_JOB_KEY);
-    if (!saved) return;
-    fetchJob(saved)
-      .then((job) => {
-        setActiveJob(job);
-        if (job.is_batch && job.items?.length) {
-          const firstDone = job.items.find((i) => i.status === "done");
-          setSelectedItemId(firstDone?.id ?? job.items[0].id);
+    let cancelled = false;
+
+    const applyJob = (job: Job) => {
+      setActiveJob(job);
+      if (job.is_batch && job.items?.length) {
+        const firstDone = job.items.find((i) => i.status === "done");
+        setSelectedItemId(firstDone?.id ?? job.items[0].id);
+      }
+      if (TERMINAL_STATUSES.has(job.status)) persistActiveJob(null);
+      else persistActiveJob(job.id);
+    };
+
+    (async () => {
+      setRestoring(true);
+      try {
+        let recent: Job[] = [];
+        try {
+          const res = await fetch(`${apiBase}/jobs?limit=10`);
+          const data = await res.json();
+          recent = data.jobs || [];
+          if (!cancelled) setRecentJobs(recent);
+        } catch {
+          /* ignore list errors */
         }
-        if (TERMINAL_STATUSES.has(job.status)) {
-          persistActiveJob(null);
+
+        const saved = typeof window !== "undefined" ? localStorage.getItem(ACTIVE_JOB_KEY) : null;
+        let restored: Job | null = null;
+
+        if (saved) {
+          try {
+            restored = await fetchJob(saved);
+          } catch {
+            /* keep key; fall through to recent running job */
+          }
         }
-      })
-      .catch(() => persistActiveJob(null));
-  }, [fetchJob, fetchRecent]);
+
+        if (!restored) {
+          const running = recent.find((j) => !TERMINAL_STATUSES.has(j.status));
+          if (running) {
+            try {
+              restored = await fetchJob(running.id);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+
+        if (!cancelled && restored) applyJob(restored);
+        else if (saved && !restored) {
+          const listed = recent.some((j) => j.id === saved && !TERMINAL_STATUSES.has(j.status));
+          if (!listed) persistActiveJob(null);
+        }
+      } finally {
+        if (!cancelled) setRestoring(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, fetchJob]);
 
   useEffect(() => {
     if (!activeJob || TERMINAL_STATUSES.has(activeJob.status)) return;
@@ -189,9 +236,23 @@ export default function VideoScraperPanel() {
       } catch {
         clearInterval(interval);
       }
-    }, 2500);
+    }, 1500);
     return () => clearInterval(interval);
   }, [activeJob?.id, activeJob?.status, fetchJob, fetchRecent]);
+
+  // As soon as any batch item finishes, surface it without waiting for the whole job.
+  useEffect(() => {
+    if (!activeJob?.is_batch || !activeJob.items?.length) return;
+    if (selectedItemId) {
+      const stillThere = activeJob.items.some((i) => i.id === selectedItemId);
+      if (stillThere) return;
+    }
+    const firstDone = activeJob.items.find((i) => i.status === "done");
+    if (firstDone) {
+      setSelectedItemId(firstDone.id);
+      setTab("overview");
+    }
+  }, [activeJob?.id, activeJob?.is_batch, activeJob?.items, selectedItemId]);
 
   useEffect(() => {
     if (!activeJob) return;
@@ -247,9 +308,8 @@ export default function VideoScraperPanel() {
     } else {
       setSelectedItemId(null);
     }
-    if (!TERMINAL_STATUSES.has(full.status)) {
-      persistActiveJob(full.id);
-    }
+    if (!TERMINAL_STATUSES.has(full.status)) persistActiveJob(full.id);
+    else persistActiveJob(null);
   };
 
   const viewTarget: ViewTarget | null = (() => {
@@ -292,24 +352,50 @@ export default function VideoScraperPanel() {
     }
   };
 
-  const downloadExport = (format: "md" | "json") => {
+  const downloadExport = (format: "md" | "json" | "pdf") => {
     if (!viewTarget || !activeJob) return;
     const payload = activeJob.is_batch
       ? { job: activeJob, item: viewTarget }
       : activeJob;
-    const content =
-      format === "json"
-        ? JSON.stringify(payload, null, 2)
-        : `# ${viewTarget.title}\n\n${viewTarget.summary_json?.one_line_summary}\n\n## Key Points\n${viewTarget.summary_json?.key_points?.map((p) => `- ${p}`).join("\n") ?? ""}\n\n## Transcript\n${viewTarget.transcript ?? ""}`;
-    const blob = new Blob([content], { type: "text/plain" });
+
+    let blob: Blob;
+    let ext: string;
+    if (format === "pdf") {
+      blob = buildScrapePdf({
+        title: viewTarget.title || "Video Scrape",
+        channel: viewTarget.channel_or_author,
+        durationSeconds: viewTarget.duration_seconds,
+        oneLineSummary: viewTarget.summary_json?.one_line_summary,
+        keyPoints: viewTarget.summary_json?.key_points,
+        chapters: viewTarget.summary_json?.chapters,
+        topics: viewTarget.summary_json?.topics,
+        transcript: viewTarget.transcript,
+        sourceUrl: viewTarget.video_url || activeJob.source_url,
+      });
+      ext = "pdf";
+    } else if (format === "json") {
+      blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      ext = "json";
+    } else {
+      const content = `# ${viewTarget.title}\n\n${viewTarget.summary_json?.one_line_summary}\n\n## Key Points\n${viewTarget.summary_json?.key_points?.map((p) => `- ${p}`).join("\n") ?? ""}\n\n## Transcript\n${viewTarget.transcript ?? ""}`;
+      blob = new Blob([content], { type: "text/markdown" });
+      ext = "md";
+    }
+
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `scrape-${viewTarget.id}.${format === "json" ? "json" : "md"}`;
+    a.download = `scrape-${viewTarget.id}.${ext}`;
     a.click();
+    URL.revokeObjectURL(a.href);
   };
 
   const isRunning = activeJob && !TERMINAL_STATUSES.has(activeJob.status);
   const isComplete = activeJob && (activeJob.status === "done" || activeJob.status === "partial");
+  const doneItemsCount = activeJob?.items?.filter((i) => i.status === "done").length ?? 0;
+  // Show per-video results as soon as any item is done, not only when the batch finishes.
+  const showResults =
+    !!isComplete ||
+    (!!isRunning && !!activeJob?.is_batch && (doneItemsCount > 0 || (activeJob.items?.length ?? 0) > 0));
   const canViewContent = viewTarget?.status === "done";
 
   return (
@@ -344,7 +430,11 @@ export default function VideoScraperPanel() {
           </CardContent>
         </Card>
 
-        {!activeJob && (
+        {restoring && !activeJob && (
+          <p className="text-sm text-text-secondary mb-6">Restoring scrape progress…</p>
+        )}
+
+        {!restoring && !activeJob && (
           <EmptyState
             title="No scrape in progress"
             description="Paste a URL above to extract transcripts and summaries."
@@ -360,25 +450,19 @@ export default function VideoScraperPanel() {
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-a" />
               </span>
               <p className="font-mono text-xs text-accent-a uppercase tracking-wider">
-                {activeJob.status === "discovering" ? "Discovering videos…" : "Processing batch…"}
+                {activeJob.status === "discovering"
+                  ? "Discovering videos…"
+                  : doneItemsCount > 0
+                    ? `Processing… ${doneItemsCount} ready to view`
+                    : "Processing batch…"}
               </p>
             </div>
             <ProgressBar progress={activeJob.progress} />
             <p className="font-mono text-sm text-text-secondary truncate">{activeJob.source_url}</p>
-
-            {activeJob.is_batch && activeJob.items && activeJob.items.length > 0 && (
-              <div className="mt-4 max-h-48 overflow-y-auto space-y-1 border-t border-border pt-3">
-                {activeJob.items.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center gap-2 font-mono text-[10px] text-text-dim py-0.5"
-                  >
-                    {itemStatusIcon(item.status)}
-                    <span className="truncate flex-1">{item.title || item.video_url}</span>
-                    <span className="uppercase shrink-0">{item.status}</span>
-                  </div>
-                ))}
-              </div>
+            {doneItemsCount > 0 && (
+              <p className="text-xs text-ok mt-3">
+                Completed videos are available below — you can open them while others finish.
+              </p>
             )}
             </CardContent>
           </Card>
@@ -388,7 +472,7 @@ export default function VideoScraperPanel() {
           <Alert variant="danger" title="Scrape failed">{activeJob.error}</Alert>
         )}
 
-        {isComplete && (
+        {showResults && activeJob && (
           <div>
             {activeJob.is_batch && activeJob.items && (
               <div className="mb-4">
@@ -406,7 +490,9 @@ export default function VideoScraperPanel() {
                       className={`text-left border rounded-lg p-3 transition-colors ${
                         selectedItemId === item.id
                           ? "border-accent-a bg-accent-a/5"
-                          : "border-border bg-panel hover:border-border-bright"
+                          : item.status === "done"
+                            ? "border-border bg-panel hover:border-border-bright"
+                            : "border-border bg-surface-muted/50 hover:border-border-bright opacity-80"
                       }`}
                     >
                       <div className="flex items-start gap-2">
@@ -415,7 +501,9 @@ export default function VideoScraperPanel() {
                           <p className="font-mono text-xs text-text-primary truncate">
                             {item.title || `Video ${item.sort_order + 1}`}
                           </p>
-                          <p className="font-mono text-[10px] text-text-dim mt-0.5">{item.status}</p>
+                          <p className="font-mono text-[10px] text-text-dim mt-0.5">
+                            {item.status === "done" ? "Ready · click to view" : item.status}
+                          </p>
                         </div>
                       </div>
                     </button>
@@ -425,7 +513,7 @@ export default function VideoScraperPanel() {
             )}
 
             {activeJob.status === "partial" && (
-              <p className="font-mono text-xs text-amber-400 mb-4">{activeJob.error}</p>
+              <p className="font-mono text-xs text-amber-700 mb-4">{activeJob.error}</p>
             )}
 
             {canViewContent && viewTarget && (
@@ -521,6 +609,7 @@ export default function VideoScraperPanel() {
                   <Card>
                     <CardContent className="py-5 flex gap-3">
                       <Button variant="outline" onClick={() => downloadExport("md")}>Download .md</Button>
+                      <Button variant="outline" onClick={() => downloadExport("pdf")}>Download .pdf</Button>
                       <Button variant="outline" onClick={() => downloadExport("json")}>Download .json</Button>
                     </CardContent>
                   </Card>
@@ -528,10 +617,16 @@ export default function VideoScraperPanel() {
               </Tabs>
             )}
 
+            {viewTarget && viewTarget.status !== "done" && viewTarget.status !== "failed" && (
+              <p className="text-sm text-text-secondary mt-2">
+                This video is still processing ({viewTarget.status})… results will appear here when ready.
+              </p>
+            )}
+
             {viewTarget && viewTarget.status === "failed" && (
-              <div className="bg-red-950/30 border border-red-800 rounded-lg p-4 mt-2">
-                <p className="font-mono text-xs text-red-300">{viewTarget.error}</p>
-              </div>
+              <Alert variant="danger" title="This video failed" className="mt-2">
+                {viewTarget.error}
+              </Alert>
             )}
           </div>
         )}

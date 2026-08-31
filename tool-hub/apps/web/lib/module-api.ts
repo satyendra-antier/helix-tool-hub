@@ -14,6 +14,8 @@ const MODULE_HOST_PORTS: Record<string, string> = {
   "build-readiness": process.env.BUILD_READINESS_HOST_PORT || "8104",
 };
 
+const DEFAULT_TIMEOUT_MS = 12_000;
+
 export function getModuleApiBase(slug: string): string {
   if (MODULE_API_URLS[slug]) return MODULE_API_URLS[slug]!;
   const port = MODULE_HOST_PORTS[slug] || "8100";
@@ -23,17 +25,35 @@ export function getModuleApiBase(slug: string): string {
 export async function fetchModule(
   slug: string,
   path: string,
-  init?: RequestInit
+  init?: RequestInit & { timeoutMs?: number }
 ): Promise<Response> {
   const base = getModuleApiBase(slug);
   const url = `${base.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
   const headers = new Headers(init?.headers);
   const serviceKey = process.env.HUB_SERVICE_KEY;
   if (serviceKey) headers.set("X-Hub-Service-Key", serviceKey);
-  return fetch(url, { ...init, headers, cache: "no-store" });
+
+  const timeoutMs = init?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const { timeoutMs: _t, signal: _s, ...rest } = init || {};
+    return await fetch(url, {
+      ...rest,
+      headers,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-export async function fetchModuleJson<T>(slug: string, path: string, init?: RequestInit): Promise<T | null> {
+export async function fetchModuleJson<T>(
+  slug: string,
+  path: string,
+  init?: RequestInit & { timeoutMs?: number }
+): Promise<T | null> {
   try {
     const res = await fetchModule(slug, path, init);
     if (!res.ok) return null;
