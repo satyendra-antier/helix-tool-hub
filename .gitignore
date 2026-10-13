@@ -40,6 +40,9 @@ wheels/
 .installed.cfg
 *.egg
 .venv/
+.venv-local/
+.local-logs/
+.local-media/
 venv/
 env/
 ENV/

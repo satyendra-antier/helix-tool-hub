@@ -9,3 +9,4 @@ httpx==0.28.0
 beautifulsoup4==4.12.3
 feedparser==6.0.11
 python-multipart==0.0.17
+dnspython==2.7.0

@@ -1,7 +1,7 @@
 {
   "id": "market-depth-analyzer",
-  "name": "Market Depth Analyzer",
-  "tagline": "Real signal, not AI opinion — where the revenue actually is.",
+  "name": "Find Demand",
+  "tagline": "AI scans the market to show where buyers are spending.",
   "icon": "trending-up",
   "route": "/tools/market-depth-analyzer",
   "backendBaseUrl": "http://market-depth-api:8002",

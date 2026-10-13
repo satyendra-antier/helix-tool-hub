@@ -10,6 +10,8 @@ const nextConfig = {
     "@tool-hub/market-depth-frontend",
     "@tool-hub/lead-intelligence-frontend",
     "@tool-hub/build-readiness-frontend",
+    "@tool-hub/growth-pillars-frontend",
+    "@tool-hub/outreach-autopilot-frontend",
   ],
 };
 

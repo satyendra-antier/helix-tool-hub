@@ -1,8 +1,8 @@
 {
   "id": "build-readiness",
-  "name": "Build Readiness Engine",
-  "tagline": "Index your company depth, cross-market demand, and get a GO / NO-GO verdict with a build plan.",
-  "icon": "compass",
+  "name": "Check Fit",
+  "tagline": "AI checks which markets we can deliver in, with a GO / maybe / no answer and a build plan.",
+  "icon": "shield-check",
   "route": "/tools/build-readiness",
   "backendBaseUrl": "http://build-readiness-api:8004",
   "status": "active",

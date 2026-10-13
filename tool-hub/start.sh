@@ -45,6 +45,8 @@ VIDEO_PORT="${VIDEO_SCRAPER_HOST_PORT:-8101}"
 MARKET_PORT="${MARKET_DEPTH_HOST_PORT:-8102}"
 LEADS_PORT="${LEAD_INTELLIGENCE_HOST_PORT:-8103}"
 BUILD_PORT="${BUILD_READINESS_HOST_PORT:-8104}"
+PILLARS_PORT="${GROWTH_PILLARS_HOST_PORT:-8105}"
+OUTREACH_PORT="${OUTREACH_HOST_PORT:-8106}"
 
 compose() {
   $COMPOSE_CMD -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" --env-file .env "$@"
@@ -55,7 +57,7 @@ MODE="${1:-up}"
 case "$MODE" in
   up|start)
     log "Building and starting Tool Hub (project: $COMPOSE_PROJECT)..."
-    log "Host ports — dashboard:$WEB_PORT video:$VIDEO_PORT market:$MARKET_PORT leads:$LEADS_PORT build:$BUILD_PORT"
+    log "Host ports — dashboard:$WEB_PORT video:$VIDEO_PORT market:$MARKET_PORT leads:$LEADS_PORT build:$BUILD_PORT pillars:$PILLARS_PORT outreach:$OUTREACH_PORT"
     compose up --build -d
     log "Waiting for services..."
     sleep 10
@@ -66,6 +68,8 @@ case "$MODE" in
     log "  Market API: http://localhost:$MARKET_PORT/docs"
     log "  Leads API:  http://localhost:$LEADS_PORT/docs"
     log "  Build API:  http://localhost:$BUILD_PORT/docs"
+    log "  Pillars API: http://localhost:$PILLARS_PORT/docs"
+    log "  Reach Out API: http://localhost:$OUTREACH_PORT/docs"
     log ""
     log "View logs:  ./start.sh logs"
     log "Stop:       ./start.sh down  (only stops toolhub project)"

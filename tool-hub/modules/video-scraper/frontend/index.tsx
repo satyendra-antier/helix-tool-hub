@@ -54,6 +54,8 @@ type SummaryJson = {
   chapters: { timestamp_hint: string; title: string }[];
   notable_quotes: string[];
   topics: string[];
+  generated_by?: string;
+  note?: string;
 };
 
 type Job = {
@@ -547,6 +549,9 @@ export default function VideoScraperPanel() {
                         <p className="text-text-secondary mt-3 leading-relaxed">
                           {viewTarget.summary_json?.one_line_summary}
                         </p>
+                        {viewTarget.summary_json?.note && (
+                          <p className="text-xs text-text-muted mt-2">{viewTarget.summary_json.note}</p>
+                        )}
                         <div className="flex gap-1.5 mt-3 flex-wrap">
                           {viewTarget.summary_json?.topics?.map((t) => (
                             <Badge key={t} variant="primary">{t}</Badge>

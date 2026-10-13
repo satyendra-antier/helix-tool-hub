@@ -1,7 +1,7 @@
 {
   "id": "video-scraper",
-  "name": "Video Scraper",
-  "tagline": "Any URL in, structured transcript + summary out.",
+  "name": "Proof Library",
+  "tagline": "Turn demo videos into proof for proposals: transcript and summary from any link.",
   "icon": "film",
   "route": "/tools/video-scraper",
   "backendBaseUrl": "http://video-scraper-api:8001",

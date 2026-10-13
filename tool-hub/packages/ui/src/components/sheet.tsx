@@ -36,7 +36,7 @@ export const SheetContent = React.forwardRef<
       role="dialog"
       aria-modal="true"
       className={cn(
-        "fixed z-50 flex flex-col gap-4 bg-surface shadow-xl transition ease-in-out",
+        "fixed z-50 flex flex-col gap-4 overflow-y-auto overscroll-contain bg-surface shadow-xl transition ease-in-out",
         "data-[state=open]:animate-in data-[state=closed]:animate-out",
         side === "right" &&
           "inset-y-0 right-0 h-full w-full max-w-lg border-l border-border p-6 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",

@@ -11,11 +11,11 @@ export default function MethodologyPage() {
       <article className="max-w-3xl mx-auto px-4 py-16 prose prose-slate">
         <h1 className="text-3xl font-semibold text-text-primary">Methodology</h1>
         <p className="text-text-secondary leading-relaxed mt-4">
-          Tool Hub combines algorithmic market scoring with company-specific retrieval-augmented verdicts.
+          LeadGen AI combines algorithmic market scoring with company-specific retrieval-augmented verdicts.
           Outputs are designed for board reporting and BD operations — not open-ended chat.
         </p>
 
-        <h2 className="text-xl font-semibold mt-10 text-text-primary">Market Depth scoring</h2>
+        <h2 className="text-xl font-semibold mt-10 text-text-primary">Step 1 · Find Demand: how markets are scored</h2>
         <p className="text-text-secondary mt-2">
           Each domain receives a composite score (0–100) from min-max normalized signals. Default weights:
         </p>
@@ -27,7 +27,7 @@ export default function MethodologyPage() {
           ))}
         </ul>
 
-        <h2 className="text-xl font-semibold mt-10 text-text-primary">Build Readiness verdicts</h2>
+        <h2 className="text-xl font-semibold mt-10 text-text-primary">Step 2 · Check Fit: GO / maybe / no answers</h2>
         <p className="text-text-secondary mt-2">
           For each domain, opportunity score combines market heat with indexed capability depth from your website and videos.
           Verdicts: GO, CONDITIONAL, NO_GO — each with citations from your own content.

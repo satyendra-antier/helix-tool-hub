@@ -27,7 +27,20 @@ import {
   CardContent,
 } from "@tool-hub/ui";
 import { getModuleTheme } from "@tool-hub/ui";
-import { Play, Save } from "lucide-react";
+import { Save, Wand2 } from "lucide-react";
+import { getStep } from "@/lib/journey";
+
+const NODE_NAMES: Record<string, string> = {
+  "market-depth": "Find Demand",
+  "build-readiness": "Check Fit",
+  "lead-intelligence": "Find Leads",
+  "growth-pillars": "Win Leads",
+  "outreach-autopilot": "Reach Out",
+  "video-scraper": "Proof Library",
+  hiring: "Hiring data",
+  capital: "Funding data",
+  github: "GitHub data",
+};
 
 const NODE_POSITIONS: Record<string, { x: number; y: number }> = {
   hiring: { x: 0, y: 40 },
@@ -37,6 +50,8 @@ const NODE_POSITIONS: Record<string, { x: number; y: number }> = {
   "build-readiness": { x: 560, y: 120 },
   "lead-intelligence": { x: 840, y: 120 },
   "video-scraper": { x: 560, y: 280 },
+  "growth-pillars": { x: 1120, y: 120 },
+  "outreach-autopilot": { x: 1400, y: 120 },
 };
 
 function ModuleNode({ data }: { data: { label: string; moduleId: string; selected: boolean } }) {
@@ -47,7 +62,7 @@ function ModuleNode({ data }: { data: { label: string; moduleId: string; selecte
       style={{ borderColor: data.selected ? theme.accent : "var(--border)" }}
     >
       <Handle type="target" position={Position.Left} />
-      <p className="text-xs text-text-muted uppercase">{data.moduleId}</p>
+      <p className="text-xs text-text-muted uppercase">{getStep(data.moduleId) ? "AI step" : "Extra"}</p>
       <p className="text-sm font-semibold">{data.label}</p>
       <Handle type="source" position={Position.Right} />
     </div>
@@ -67,32 +82,44 @@ const nodeTypes = { module: ModuleNode, source: SourceNode };
 
 function buildGraph(selectedId: string | null): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = [
-    { id: "hiring", type: "source", position: NODE_POSITIONS.hiring, data: { label: "Hiring APIs" } },
-    { id: "capital", type: "source", position: NODE_POSITIONS.capital, data: { label: "DefiLlama" } },
+    { id: "hiring", type: "source", position: NODE_POSITIONS.hiring, data: { label: "Hiring data" } },
+    { id: "capital", type: "source", position: NODE_POSITIONS.capital, data: { label: "Funding data" } },
     { id: "github", type: "source", position: NODE_POSITIONS.github, data: { label: "GitHub" } },
     {
       id: "market-depth",
       type: "module",
       position: NODE_POSITIONS["market-depth"],
-      data: { label: "Market Depth", moduleId: "market-depth-analyzer", selected: selectedId === "market-depth" },
+      data: { label: "1 · Find Demand", moduleId: "market-depth-analyzer", selected: selectedId === "market-depth" },
     },
     {
       id: "build-readiness",
       type: "module",
       position: NODE_POSITIONS["build-readiness"],
-      data: { label: "Build Readiness", moduleId: "build-readiness", selected: selectedId === "build-readiness" },
+      data: { label: "2 · Check Fit", moduleId: "build-readiness", selected: selectedId === "build-readiness" },
     },
     {
       id: "lead-intelligence",
       type: "module",
       position: NODE_POSITIONS["lead-intelligence"],
-      data: { label: "Lead Intelligence", moduleId: "lead-intelligence", selected: selectedId === "lead-intelligence" },
+      data: { label: "3 · Find Leads", moduleId: "lead-intelligence", selected: selectedId === "lead-intelligence" },
     },
     {
       id: "video-scraper",
       type: "module",
       position: NODE_POSITIONS["video-scraper"],
-      data: { label: "Video Scraper", moduleId: "video-scraper", selected: selectedId === "video-scraper" },
+      data: { label: "Proof Library", moduleId: "video-scraper", selected: selectedId === "video-scraper" },
+    },
+    {
+      id: "growth-pillars",
+      type: "module",
+      position: NODE_POSITIONS["growth-pillars"],
+      data: { label: "4 · Win Leads", moduleId: "growth-pillars", selected: selectedId === "growth-pillars" },
+    },
+    {
+      id: "outreach-autopilot",
+      type: "module",
+      position: NODE_POSITIONS["outreach-autopilot"],
+      data: { label: "5 · Reach Out", moduleId: "outreach-autopilot", selected: selectedId === "outreach-autopilot" },
     },
   ];
   const edges: Edge[] = [
@@ -103,6 +130,8 @@ function buildGraph(selectedId: string | null): { nodes: Node[]; edges: Edge[] }
     { id: "e5", source: "build-readiness", target: "lead-intelligence", animated: true },
     { id: "e6", source: "video-scraper", target: "build-readiness", animated: true },
     { id: "e7", source: "market-depth", target: "lead-intelligence", animated: true },
+    { id: "e8", source: "lead-intelligence", target: "growth-pillars", animated: true },
+    { id: "e9", source: "growth-pillars", target: "outreach-autopilot", animated: true },
   ];
   return { nodes, edges };
 }
@@ -156,8 +185,8 @@ export default function StudioPage() {
   return (
     <div className="space-y-4 pb-8">
       <PageHeader
-        title="Pipeline Studio"
-        description="Configure the revenue flywheel template — topology is fixed; tune weights, domains, and thresholds."
+        title="Automation"
+        description="See how the 4 steps connect and tune the settings AI uses when it runs them all. Click a step to change it."
         actions={
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={saveConfig} disabled={saving}>
@@ -165,8 +194,8 @@ export default function StudioPage() {
               Save
             </Button>
             <Button size="sm" onClick={runPipeline}>
-              <Play className="h-4 w-4 mr-1" />
-              Run flywheel
+              <Wand2 className="h-4 w-4 mr-1" />
+              Run all steps with AI
             </Button>
           </div>
         }
@@ -207,7 +236,7 @@ export default function StudioPage() {
       <Sheet open={!!selectedNode} onOpenChange={(o) => !o && setSelectedNode(null)}>
         <SheetContent>
           <SheetHeader>
-            <SheetTitle>Configure {selectedNode}</SheetTitle>
+            <SheetTitle>Settings: {(selectedNode && NODE_NAMES[selectedNode]) || selectedNode}</SheetTitle>
           </SheetHeader>
           {selectedNode === "market-depth" && nodeConfig ? (
             <div className="space-y-4 mt-4">
@@ -252,9 +281,75 @@ export default function StudioPage() {
               </div>
             </div>
           ) : null}
-          {selectedNode && !["market-depth", "lead-intelligence"].includes(selectedNode) ? (
+          {selectedNode === "growth-pillars" ? (
+            <div className="space-y-4 mt-4">
+              {(
+                [
+                  ["watchlistSize", "Accounts to watch", 25],
+                  ["minLeadScore", "Min lead score", 40],
+                  ["advisoryTopN", "Leads to coach per run", 10],
+                ] as const
+              ).map(([key, label, fallback]) => {
+                const gp = (nodeConfig || DEFAULT_PIPELINE_CONFIG.nodes["growth-pillars"]) as Record<string, unknown>;
+                return (
+                  <div key={key}>
+                    <Label>{label}</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={(gp[key] as number | undefined) ?? fallback}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          nodes: {
+                            ...config.nodes,
+                            "growth-pillars": { ...gp, [key]: parseInt(e.target.value, 10) || 0 },
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+          {selectedNode === "outreach-autopilot" ? (
+            <div className="space-y-4 mt-4">
+              <p className="text-sm text-text-secondary">
+                A full run only drafts first emails. They wait for your approval in Reach Out before anything is sent.
+              </p>
+              {(
+                [
+                  ["draftForTopN", "First emails to draft per run", 10],
+                  ["minLeadScore", "Min lead score", 60],
+                ] as const
+              ).map(([key, label, fallback]) => {
+                const oc = (nodeConfig || DEFAULT_PIPELINE_CONFIG.nodes["outreach-autopilot"]) as Record<string, unknown>;
+                return (
+                  <div key={key}>
+                    <Label>{label}</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={(oc[key] as number | undefined) ?? fallback}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          nodes: {
+                            ...config.nodes,
+                            "outreach-autopilot": { ...oc, [key]: parseInt(e.target.value, 10) || 0 },
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+          {selectedNode && !["market-depth", "lead-intelligence", "growth-pillars", "outreach-autopilot"].includes(selectedNode) ? (
             <p className="text-sm text-text-secondary mt-4">
-              Select Market Depth or Lead Intelligence to edit template parameters. Other nodes use module defaults.
+              Find Demand, Find Leads, Win Leads and Reach Out have settings you can change here. This step uses its own defaults.
             </p>
           ) : null}
         </SheetContent>

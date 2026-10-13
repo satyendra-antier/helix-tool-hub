@@ -29,11 +29,25 @@ export const VideoScraperNodeConfigSchema = z.object({
   enrichBuildReadiness: z.boolean().default(true),
 });
 
+export const GrowthPillarsNodeConfigSchema = z.object({
+  watchlistSize: z.number().min(1).max(200).default(25),
+  minLeadScore: z.number().min(0).max(100).default(40),
+  advisoryTopN: z.number().min(0).max(50).default(10),
+  rescoreLeads: z.boolean().default(true),
+});
+
+export const OutreachNodeConfigSchema = z.object({
+  draftForTopN: z.number().min(0).max(100).default(10),
+  minLeadScore: z.number().min(0).max(100).default(60),
+});
+
 export const PipelineNodeConfigSchema = z.union([
   MarketDepthNodeConfigSchema,
   BuildReadinessNodeConfigSchema,
   LeadIntelligenceNodeConfigSchema,
   VideoScraperNodeConfigSchema,
+  GrowthPillarsNodeConfigSchema,
+  OutreachNodeConfigSchema,
 ]);
 
 export const PipelineConfigSchema = z.object({
@@ -47,6 +61,8 @@ export type MarketDepthNodeConfig = z.infer<typeof MarketDepthNodeConfigSchema>;
 export type BuildReadinessNodeConfig = z.infer<typeof BuildReadinessNodeConfigSchema>;
 export type LeadIntelligenceNodeConfig = z.infer<typeof LeadIntelligenceNodeConfigSchema>;
 export type VideoScraperNodeConfig = z.infer<typeof VideoScraperNodeConfigSchema>;
+export type GrowthPillarsNodeConfig = z.infer<typeof GrowthPillarsNodeConfigSchema>;
+export type OutreachNodeConfig = z.infer<typeof OutreachNodeConfigSchema>;
 
 export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   templateId: "revenue-flywheel",
@@ -69,6 +85,16 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
     "video-scraper": {
       channelUrls: [],
       enrichBuildReadiness: true,
+    },
+    "growth-pillars": {
+      watchlistSize: 25,
+      minLeadScore: 40,
+      advisoryTopN: 10,
+      rescoreLeads: true,
+    },
+    "outreach-autopilot": {
+      draftForTopN: 10,
+      minLeadScore: 60,
     },
   },
 };

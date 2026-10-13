@@ -1,6 +1,8 @@
 import os
+import re
 import subprocess
 import tempfile
+from collections import Counter
 
 from config import settings
 from llm_client import chat, parse_json
@@ -84,12 +86,42 @@ def transcribe_audio(audio_url: str, source_url: str) -> str:
         return _transcribe_audio_file(audio_path)
 
 
+STOPWORDS = set(
+    "a an and are as at be but by can do for from has have i if in into is it its just like more not of on "
+    "or our so that the their them then there these they this to up was we were what when which who will "
+    "with you your yeah okay um uh know get got going really very also all one about out would could "
+    "should been being because how than some any my me us he she his her".split()
+)
+
+
+def basic_summary(transcript: str, note: str) -> dict:
+    """Summary without AI: opening sentences, longest lines as key points, most repeated words as topics."""
+    text = " ".join(transcript.split())
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if len(s.strip()) > 30]
+    words = [w for w in re.findall(r"[a-zA-Z][a-zA-Z\-]{3,}", text.lower()) if w not in STOPWORDS]
+    topics = [w for w, _ in Counter(words).most_common(8)]
+    key_points = sorted(sentences[:60], key=len, reverse=True)[:5]
+    return {
+        "one_line_summary": (sentences[0] if sentences else text[:200])[:300],
+        "key_points": key_points,
+        "chapters": [],
+        "notable_quotes": [s for s in sentences if '"' in s][:3],
+        "topics": topics,
+        "generated_by": "basic",
+        "note": note,
+    }
+
+
 def summarize_transcript(transcript: str) -> dict:
     if not settings.resolve_api_key():
-        raise ValueError(
-            "VIDEO_SCRAPER_OPENAI_API_KEY or OPENAI_API_KEY required for summarization (gpt-5-mini)"
-        )
+        return basic_summary(transcript, "Basic summary. Add OPENAI_API_KEY to .env for an AI summary.")
+    try:
+        return _ai_summary(transcript)
+    except Exception as exc:  # noqa: BLE001
+        return basic_summary(transcript, f"AI summary failed ({str(exc)[:120]}), showing a basic summary.")
 
+
+def _ai_summary(transcript: str) -> dict:
     prompt = f"""You are summarizing a video transcript. Return ONLY valid JSON, no markdown fences, no preamble.
 
 Schema:

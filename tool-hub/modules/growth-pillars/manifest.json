@@ -1,0 +1,12 @@
+{
+  "id": "growth-pillars",
+  "name": "Win Leads",
+  "tagline": "Warm intros, account alerts, partners, AI search rank and a deal coach for your best leads.",
+  "icon": "handshake",
+  "route": "/tools/growth-pillars",
+  "backendBaseUrl": "http://growth-pillars-api:8005",
+  "status": "beta",
+  "requiredEnv": ["OPENAI_API_KEY"],
+  "category": "growth",
+  "version": "1.0.0"
+}

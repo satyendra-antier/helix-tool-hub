@@ -256,7 +256,10 @@ def fetch_remoteok_jobs(keywords: list[str], limit: int = 15) -> list[RawLead]:
                 continue
             company = (j.get("company") or "Unknown").strip()
             if company not in company_counts:
-                company_counts[company] = {"count": 0, "titles": [], "hits": set()}
+                company_counts[company] = {
+                    "count": 0, "titles": [], "hits": set(),
+                    "url": j.get("company_url") or "",
+                }
             company_counts[company]["count"] += 1
             company_counts[company]["hits"].update(hits)
             if len(company_counts[company]["titles"]) < 3:
@@ -269,7 +272,7 @@ def fetch_remoteok_jobs(keywords: list[str], limit: int = 15) -> list[RawLead]:
                     h in {"defi", "solidity", "ethereum", "web3", "blockchain", "stablecoin", "crypto"}
                     for h in info["hits"]
                 ) else "ai",
-                domain=_extract_domain(j.get("url", "")) if jobs else None,
+                domain=_extract_domain(info["url"]),
                 description=clean_description(
                     f"Hiring: {info['count']} remote roles — {', '.join(info['titles'][:2])}"
                 ),

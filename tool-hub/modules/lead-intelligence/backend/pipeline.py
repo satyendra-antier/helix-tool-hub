@@ -15,9 +15,63 @@ from scoring.lead_score import score_lead, DEFAULT_KEYWORDS, DEFAULT_WEIGHTS
 from scoring.domain_match import match_domains, classify_orientation
 from intelligence_bridge import build_intelligence_context
 from outreach import generate_outreach_draft
+from pillar_signals import fetch_pillar_signals, pillar_signal_for
 from lead_quality import sanitize_raw_lead, entity_is_junk
 from text_utils import clean_description
 from track_utils import normalize_lead_track
+
+
+SALES_CHECK_DEFAULT_WEIGHT = 0.15
+
+
+def _lead_sources(entity: LeadEntity, contacts: list) -> list[dict]:
+    sources: list[dict] = []
+    payload = entity.raw_payload or {}
+    for key in ("link", "url", "source_url"):
+        val = payload.get(key)
+        if isinstance(val, str) and val.startswith("http"):
+            sources.append({"label": entity.source or "signal", "url": val})
+            break
+    for c in contacts:
+        url = getattr(c, "source_url", None)
+        if url and all(s["url"] != url for s in sources):
+            sources.append({"label": "contact page", "url": url})
+    return sources[:5]
+
+
+def apply_sales_check(
+    entity: LeadEntity,
+    composite: float,
+    breakdown: dict,
+    best: dict | None,
+    contacts: list,
+    weights: dict,
+) -> tuple[float, dict]:
+    """Blend the BANT/MEDDIC check into the score and store the 'why this lead' line."""
+    from scoring.sales_check import rule_sales_check
+
+    check, reason = rule_sales_check(
+        name=entity.name,
+        signal_type=entity.signal_type,
+        signal_value=float(entity.signal_value) if entity.signal_value else None,
+        signal_date=entity.signal_date,
+        deadline=entity.deadline,
+        breakdown=breakdown,
+        best_match=best,
+        contacts=[{"role_title": c.role_title, "email": c.email} for c in contacts],
+    )
+    if (entity.sales_check or {}).get("method") == "ai":
+        check = {**entity.sales_check}
+    else:
+        entity.sales_check = check
+    if not entity.fit_reason or (entity.sales_check or {}).get("method") != "ai":
+        entity.fit_reason = reason
+    entity.sources = _lead_sources(entity, contacts)
+
+    w = float(weights.get("sales_check", SALES_CHECK_DEFAULT_WEIGHT))
+    blended = round(composite * (1 - w) + float(check["score"]) * w, 2)
+    breakdown = {**breakdown, "sales_check": check["score"]}
+    return blended, breakdown
 
 
 def _normalize_domain(domain: str | None) -> str | None:
@@ -51,9 +105,10 @@ def sync_fit_profile_from_intelligence(db: Session) -> LeadFitProfile:
     ctx = build_intelligence_context(db)
     keywords = ctx["sync_keywords"] or DEFAULT_KEYWORDS
     version = f"sync-{datetime.utcnow().strftime('%Y%m%d%H%M')}"
+    previous = db.query(LeadFitProfile).order_by(LeadFitProfile.created_at.desc()).first()
     profile = LeadFitProfile(
         keywords=keywords,
-        weights=DEFAULT_WEIGHTS,
+        weights={**DEFAULT_WEIGHTS, **(dict(previous.weights) if previous else {})},
         version=version,
     )
     db.add(profile)
@@ -222,6 +277,12 @@ def process_lead(db: Session, raw, profile: LeadFitProfile, intel_ctx: dict) -> 
         weights=dict(profile.weights),
         orientation=orientation,
         best_match=best,
+        pillar_signal=pillar_signal_for(entity.id, entity.matched_domains, intel_ctx.get("pillar_signals")),
+    )
+    db.flush()
+    all_contacts = db.query(LeadContact).filter(LeadContact.entity_id == entity.id).all()
+    composite, breakdown = apply_sales_check(
+        entity, composite, breakdown, best, all_contacts, dict(profile.weights),
     )
 
     db.add(LeadScore(
@@ -254,9 +315,39 @@ def process_lead(db: Session, raw, profile: LeadFitProfile, intel_ctx: dict) -> 
     return entity
 
 
-def rescore_all_leads(db: Session, profile: LeadFitProfile | None = None) -> int:
-    """Re-match and re-score all leads against current Market Depth + Build Readiness."""
+def ingest_external_lead(db: Session, raw, contact: dict | None = None) -> LeadEntity | None:
+    """Add a single lead from outside discovery (e.g. a channel-partner referral)."""
     intel_ctx = build_intelligence_context(db)
+    intel_ctx["pillar_signals"] = fetch_pillar_signals()
+    profile = get_or_create_fit_profile(db)
+    entity = process_lead(db, raw, profile, intel_ctx)
+    if entity is None:
+        db.rollback()
+        return None
+    email = (contact or {}).get("email")
+    if email and not is_suppressed(db, email):
+        exists = db.query(LeadContact).filter(
+            LeadContact.entity_id == entity.id, LeadContact.email == email,
+        ).first()
+        if not exists:
+            db.add(LeadContact(
+                entity_id=entity.id,
+                full_name=(contact or {}).get("full_name"),
+                role_title=(contact or {}).get("role_title"),
+                email=email,
+                email_verified=False,
+                enrichment_source="partner-referral",
+                consent_basis="partner-referral",
+            ))
+    db.commit()
+    db.refresh(entity)
+    return entity
+
+
+def rescore_all_leads(db: Session, profile: LeadFitProfile | None = None) -> int:
+    """Re-match and re-score all leads against current Market Depth + Build Readiness + Growth Pillars."""
+    intel_ctx = build_intelligence_context(db)
+    pillar_signals = fetch_pillar_signals()
     if profile is None:
         profile = get_or_create_fit_profile(db)
     count = 0
@@ -291,6 +382,10 @@ def rescore_all_leads(db: Session, profile: LeadFitProfile | None = None) -> int
             weights=dict(profile.weights),
             orientation=orientation,
             best_match=best,
+            pillar_signal=pillar_signal_for(entity.id, entity.matched_domains, pillar_signals),
+        )
+        composite, breakdown = apply_sales_check(
+            entity, composite, breakdown, best, contacts, dict(profile.weights),
         )
         db.add(LeadScore(
             entity_id=entity.id,
@@ -360,6 +455,108 @@ def re_enrich_missing_contacts(db: Session) -> int:
     return added
 
 
+def latest_score_value(db: Session, entity_id) -> float:
+    row = (
+        db.query(LeadScore)
+        .filter(LeadScore.entity_id == entity_id)
+        .order_by(LeadScore.computed_at.desc())
+        .first()
+    )
+    return float(row.score) if row else 0.0
+
+
+def find_and_save_contacts(db: Session, entity: LeadEntity) -> list[LeadContact]:
+    """Run the free-first contact finder for one lead and store new contacts."""
+    from enrichment.contact_finder import find_contacts
+
+    if _is_portal_domain(entity.domain):
+        return []
+    domain = _resolve_enrich_domain(entity.domain, entity.raw_payload)
+    found = find_contacts(entity.name, domain, lead_score=latest_score_value(db, entity.id))
+    added: list[LeadContact] = []
+    for c in found:
+        email = (c.get("email") or "").lower()
+        if not email or is_suppressed(db, email):
+            continue
+        existing = db.query(LeadContact).filter(
+            LeadContact.entity_id == entity.id, LeadContact.email == email,
+        ).first()
+        verified_at = datetime.fromisoformat(c["verified_at"]) if c.get("verified_at") else None
+        if existing:
+            if (c.get("confidence") or 0) > float(existing.confidence or 0):
+                existing.confidence = c.get("confidence")
+                existing.email_verified = c.get("email_verified", False)
+                existing.source_url = c.get("source_url")
+                existing.verified_at = verified_at
+                existing.full_name = existing.full_name or c.get("full_name")
+                existing.role_title = existing.role_title or c.get("role_title")
+            continue
+        contact = LeadContact(
+            entity_id=entity.id,
+            full_name=c.get("full_name"),
+            role_title=c.get("role_title"),
+            email=email,
+            email_verified=c.get("email_verified", False),
+            enrichment_source=c.get("enrichment_source"),
+            consent_basis=c.get("consent_basis", "publicly-listed-company-contact"),
+            confidence=c.get("confidence"),
+            source_url=c.get("source_url"),
+            verified_at=verified_at,
+        )
+        db.add(contact)
+        added.append(contact)
+    # Drop the old unverified info@ guess once a better contact exists.
+    if any((c.get("confidence") or 0) >= 0.8 for c in found):
+        db.query(LeadContact).filter(
+            LeadContact.entity_id == entity.id,
+            LeadContact.enrichment_source == "domain-inferred",
+        ).delete()
+    db.commit()
+    return added
+
+
+LEARNABLE = ("recency", "budget_indicator", "keyword_fit", "urgency",
+             "contact_confidence", "market_demand_fit", "capability_fit", "sales_check")
+
+
+def learn_weights_from_feedback(db: Session, min_each: int = 3, rate: float = 0.15) -> LeadFitProfile | None:
+    """Nudge weights toward components that separate 'good' from 'bad' marks.
+
+    Returns a new fit profile when there is enough feedback, else None.
+    """
+    from database import LeadFeedback
+
+    rows = db.query(LeadFeedback).order_by(LeadFeedback.created_at.desc()).limit(200).all()
+    good = [r.breakdown or {} for r in rows if r.verdict == "good"]
+    bad = [r.breakdown or {} for r in rows if r.verdict == "bad"]
+    if len(good) < min_each or len(bad) < min_each:
+        return None
+
+    def avg(items: list[dict], key: str) -> float:
+        vals = [float(i.get(key, 0) or 0) for i in items]
+        return sum(vals) / len(vals) if vals else 0.0
+
+    profile = get_or_create_fit_profile(db)
+    weights = {**DEFAULT_WEIGHTS, "sales_check": SALES_CHECK_DEFAULT_WEIGHT, **dict(profile.weights)}
+    total_before = sum(weights.get(k, 0) for k in LEARNABLE)
+    for key in LEARNABLE:
+        gap = (avg(good, key) - avg(bad, key)) / 100.0
+        weights[key] = max(0.02, weights.get(key, 0) * (1 + rate * gap * 2))
+    total_after = sum(weights[k] for k in LEARNABLE)
+    for key in LEARNABLE:
+        weights[key] = round(weights[key] * total_before / total_after, 4)
+
+    new_profile = LeadFitProfile(
+        keywords=list(profile.keywords),
+        weights=weights,
+        version=f"learned-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+    )
+    db.add(new_profile)
+    db.commit()
+    db.refresh(new_profile)
+    return new_profile
+
+
 def prune_junk_leads(db: Session) -> int:
     """Remove aggregate articles and invalid names from the database."""
     removed = 0
@@ -385,6 +582,7 @@ def run_discovery(job_id: str, db: Session) -> None:
         db.commit()
 
         intel_ctx = build_intelligence_context(db)
+        intel_ctx["pillar_signals"] = fetch_pillar_signals()
         if intel_ctx.get("sync_keywords"):
             profile = sync_fit_profile_from_intelligence(db)
         else:

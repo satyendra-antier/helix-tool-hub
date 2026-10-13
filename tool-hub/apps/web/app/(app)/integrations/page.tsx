@@ -11,13 +11,28 @@ export default function IntegrationsPage() {
     fetch("/api/hub/status")
       .then((r) => r.json())
       .then((d) => {
-        setStatuses({
+        setStatuses((s) => ({
+          ...s,
           openai: !!d.integrations?.openai,
           github: !!d.integrations?.github,
           adzuna: !!d.integrations?.adzuna,
           hunter: !!d.integrations?.hunter,
           apollo: !!process.env.NEXT_PUBLIC_APOLLO,
-        });
+        }));
+      })
+      .catch(() => {});
+    fetch("/api/modules/outreach-autopilot/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c) => {
+        if (!c) return;
+        setStatuses((s) => ({
+          ...s,
+          slack: !!c.alerts?.slack,
+          telegram: !!c.alerts?.telegram,
+          hubspot: !!c.crm?.hubspot,
+          twenty: !!c.crm?.twenty,
+          dograh: !!c.calls_configured,
+        }));
       })
       .catch(() => {});
   }, []);
@@ -25,8 +40,8 @@ export default function IntegrationsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Integrations"
-        description="Live data sources powering market scoring, proof indexing, and lead enrichment."
+        title="Connections"
+        description="Data sources, alerts, CRMs and calling. Keys are set in .env on the server and never sent to the browser."
       />
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {CONNECTORS.map((c) => {

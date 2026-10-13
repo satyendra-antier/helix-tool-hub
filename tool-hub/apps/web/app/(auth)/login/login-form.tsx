@@ -4,6 +4,8 @@ import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import Link from "next/link";
+import { Sparkles } from "lucide-react";
+import { BRAND } from "@/lib/journey";
 import { Button, Input, Label, Card, CardContent, CardHeader, CardTitle, Alert } from "@tool-hub/ui";
 
 export default function LoginForm() {
@@ -36,9 +38,12 @@ export default function LoginForm() {
     <div className="min-h-screen flex items-center justify-center bg-surface-muted/40 px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <Link href="/" className="inline-block">
-            <p className="text-lg font-semibold text-text-primary">Tool Hub</p>
-            <p className="text-sm text-text-secondary">Revenue Intelligence Engine</p>
+          <Link href="/" className="inline-flex flex-col items-center gap-2">
+            <span className="ai-gradient ai-glow flex h-11 w-11 items-center justify-center rounded-xl text-white">
+              <Sparkles className="h-5 w-5" />
+            </span>
+            <p className="text-lg font-semibold ai-text">{BRAND.name}</p>
+            <p className="text-sm text-text-secondary">{BRAND.tagline}</p>
           </Link>
         </div>
         <Card>
