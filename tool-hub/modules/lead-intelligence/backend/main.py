@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from database import (
     LeadEntity, LeadContact, LeadScore, LeadPipeline,
-    LeadFitProfile, LeadSuppression, LeadJob,
+    LeadFitProfile, LeadSuppression, LeadJob, LeadFeedback,
     get_db, run_migrations,
 )
 from pipeline import (
@@ -21,7 +21,13 @@ from pipeline import (
     sync_fit_profile_from_intelligence, rescore_all_leads, prune_junk_leads,
     prune_fake_contacts,
     re_enrich_missing_contacts,
+    ingest_external_lead,
+    find_and_save_contacts,
+    latest_score_value,
+    apply_sales_check,
+    learn_weights_from_feedback,
 )
+from pillar_signals import fetch_pillar_signals, pillar_signal_for
 from enrichment.contact_policy import is_portal_domain
 from scoring.lead_score import score_lead, DEFAULT_KEYWORDS, DEFAULT_WEIGHTS
 from scoring.domain_match import match_domains, classify_orientation
@@ -64,6 +70,19 @@ class SuppressRequest(BaseModel):
     reason: str = "unsubscribe"
 
 
+class IngestRequest(BaseModel):
+    name: str
+    domain: Optional[str] = None
+    description: str = ""
+    track: str = "web2"
+    source: str = "partner"
+    signal_type: str = "referral"
+    signal_value: Optional[float] = None
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    raw_payload: dict = {}
+
+
 def _portal_link(entity: LeadEntity) -> str | None:
     payload = entity.raw_payload or {}
     for key in ("link", "url"):
@@ -86,6 +105,16 @@ def _portal_link(entity: LeadEntity) -> str | None:
         }
         return portal_urls.get(entity.domain.lower().replace("www.", ""))
     return None
+
+
+def _latest_feedback(entity_id, db: Session) -> str | None:
+    row = (
+        db.query(LeadFeedback)
+        .filter(LeadFeedback.entity_id == entity_id)
+        .order_by(LeadFeedback.created_at.desc())
+        .first()
+    )
+    return row.verdict if row else None
 
 
 def entity_to_dict(entity: LeadEntity, db: Session) -> dict:
@@ -130,9 +159,16 @@ def entity_to_dict(entity: LeadEntity, db: Session) -> dict:
                 "email_verified": c.email_verified,
                 "enrichment_source": c.enrichment_source,
                 "consent_basis": c.consent_basis,
+                "confidence": float(c.confidence) if c.confidence is not None else None,
+                "source_url": c.source_url,
+                "phone": c.phone,
             }
-            for c in contacts
+            for c in sorted(contacts, key=lambda c: -float(c.confidence or 0))
         ],
+        "fit_reason": entity.fit_reason,
+        "sales_check": entity.sales_check or None,
+        "sources": entity.sources or [],
+        "feedback": _latest_feedback(entity.id, db),
         "lead_orientation": entity.lead_orientation or "generic",
         "matched_domains": entity.matched_domains or [],
         "domain_context": entity.domain_context or {},
@@ -155,6 +191,19 @@ def startup():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/config")
+def config_status():
+    from config import settings
+    return {
+        "openai_configured": bool(settings.resolve_api_key()),
+        "chat_model": settings.resolve_chat_model(),
+        "apollo_configured": bool(settings.apollo_api_key),
+        "hunter_configured": bool(settings.hunter_api_key),
+        "sam_gov_configured": bool(settings.sam_gov_api_key),
+        "growth_pillars_signals": bool(settings.growth_pillars_api_url),
+    }
 
 
 @app.get("/pipeline/status")
@@ -346,6 +395,110 @@ def mark_sent(entity_id: UUID, db: Session = Depends(get_db)):
     return {"sent_at": pipeline.outreach_sent_at.isoformat()}
 
 
+class FeedbackRequest(BaseModel):
+    verdict: str
+
+
+@app.post("/leads/{entity_id}/feedback")
+def lead_feedback(
+    entity_id: UUID,
+    body: FeedbackRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    if body.verdict not in ("good", "bad"):
+        raise HTTPException(400, "verdict must be 'good' or 'bad'")
+    entity = db.query(LeadEntity).filter(LeadEntity.id == entity_id).first()
+    if not entity:
+        raise HTTPException(404, "Lead not found")
+    latest = (
+        db.query(LeadScore)
+        .filter(LeadScore.entity_id == entity_id)
+        .order_by(LeadScore.computed_at.desc())
+        .first()
+    )
+    db.add(LeadFeedback(entity_id=entity_id, verdict=body.verdict, breakdown=(latest.breakdown if latest else {})))
+    if body.verdict == "bad":
+        pipeline = db.query(LeadPipeline).filter(LeadPipeline.entity_id == entity_id).first()
+        if pipeline and pipeline.stage == "new":
+            pipeline.stage = "lost"
+            pipeline.notes = (pipeline.notes or "") + "\nMarked not a fit."
+    db.commit()
+
+    learned = learn_weights_from_feedback(db)
+    if learned:
+        def task():
+            from database import SessionLocal
+            session = SessionLocal()
+            try:
+                rescore_all_leads(session)
+            finally:
+                session.close()
+        background_tasks.add_task(task)
+    return {"saved": True, "weights_updated": bool(learned), "version": learned.version if learned else None}
+
+
+@app.post("/leads/{entity_id}/explain")
+def explain_lead(entity_id: UUID, db: Session = Depends(get_db)):
+    """Ask the AI for a sharper 'why this lead' line and BANT/MEDDIC check (needs OPENAI_API_KEY)."""
+    from scoring.sales_check import ai_explain
+
+    entity = db.query(LeadEntity).filter(LeadEntity.id == entity_id).first()
+    if not entity:
+        raise HTTPException(404, "Lead not found")
+    data = entity_to_dict(entity, db)
+    result = ai_explain({
+        k: data.get(k) for k in (
+            "name", "description", "signal_type", "signal_value", "signal_date",
+            "deadline", "domain_context", "contacts", "track",
+        )
+    })
+    if not result:
+        raise HTTPException(503, "AI isn't set up. Add OPENAI_API_KEY to .env to get AI explanations.")
+    check, reason = result
+    entity.sales_check = check
+    if reason:
+        entity.fit_reason = reason
+    db.commit()
+    return entity_to_dict(entity, db)
+
+
+@app.post("/leads/{entity_id}/find-contacts")
+def find_contacts_for_lead(entity_id: UUID, db: Session = Depends(get_db)):
+    entity = db.query(LeadEntity).filter(LeadEntity.id == entity_id).first()
+    if not entity:
+        raise HTTPException(404, "Lead not found")
+    added = find_and_save_contacts(db, entity)
+    return {"added": len(added), "lead": entity_to_dict(entity, db)}
+
+
+@app.post("/contacts/find-top")
+def find_contacts_for_top_leads(limit: int = 10, min_score: float = 50, db: Session = Depends(get_db)):
+    """Contact discovery for the best leads that don't yet have a confident contact."""
+    from sqlalchemy import text
+
+    rows = db.execute(text("""
+        SELECT e.id FROM leads_entities e
+        LEFT JOIN LATERAL (
+            SELECT score FROM leads_scores ls WHERE ls.entity_id = e.id
+            ORDER BY ls.computed_at DESC LIMIT 1
+        ) s ON true
+        WHERE COALESCE(s.score, 0) >= :min_score
+          AND NOT EXISTS (
+            SELECT 1 FROM leads_contacts c
+            WHERE c.entity_id = e.id AND COALESCE(c.confidence, 0) >= 0.8
+          )
+        ORDER BY s.score DESC NULLS LAST
+        LIMIT :limit
+    """), {"min_score": min_score, "limit": max(1, min(limit, 50))}).fetchall()
+    total = 0
+    for (eid,) in rows:
+        entity = db.query(LeadEntity).filter(LeadEntity.id == eid).first()
+        if entity:
+            total += len(find_and_save_contacts(db, entity))
+    return {"leads_checked": len(rows), "contacts_added": total}
+
+
 @app.get("/fit-profile")
 def get_fit_profile(db: Session = Depends(get_db)):
     profile = get_or_create_fit_profile(db)
@@ -368,6 +521,7 @@ def update_fit_profile(body: FitProfileUpdate, db: Session = Depends(get_db)):
     db.commit()
 
     intel_ctx = build_intelligence_context(db)
+    pillar_signals = fetch_pillar_signals()
     entities = db.query(LeadEntity).all()
     for entity in entities:
         target = (entity.domain_context or {}).get("domain_name")
@@ -405,6 +559,10 @@ def update_fit_profile(body: FitProfileUpdate, db: Session = Depends(get_db)):
             weights=body.weights,
             orientation=orient,
             best_match=best,
+            pillar_signal=pillar_signal_for(entity.id, entity.matched_domains, pillar_signals),
+        )
+        composite, breakdown = apply_sales_check(
+            entity, composite, breakdown, best, contacts, body.weights,
         )
         db.add(LeadScore(
             entity_id=entity.id,
@@ -431,6 +589,35 @@ def sync_fit_profile(db: Session = Depends(get_db)):
     }
 
 
+@app.post("/leads/ingest")
+def ingest_lead(body: IngestRequest, db: Session = Depends(get_db)):
+    """Add one externally sourced lead (channel-partner referral) and score it like any other."""
+    domain = (body.domain or "").lower().strip()
+    domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0] or None
+    raw = RawLead(
+        name=body.name.strip(),
+        track=normalize_lead_track(body.track),
+        domain=domain,
+        description=body.description,
+        source=body.source,
+        signal_type=body.signal_type,
+        signal_value=body.signal_value,
+        signal_date=datetime.utcnow().date(),
+        raw_payload=body.raw_payload or {},
+    )
+    contact = {"full_name": body.contact_name, "email": body.contact_email} if body.contact_email else None
+    entity = ingest_external_lead(db, raw, contact)
+    if entity is None:
+        raise HTTPException(400, "Lead rejected by quality filter (name looks invalid)")
+    return entity_to_dict(entity, db)
+
+
+@app.post("/leads/rescore")
+def rescore_leads(db: Session = Depends(get_db)):
+    """Re-score all leads with the current fit profile, intelligence and Growth Pillars signals."""
+    return {"rescored_leads": rescore_all_leads(db)}
+
+
 @app.post("/leads/cleanup")
 def cleanup_junk_leads(db: Session = Depends(get_db)):
     junk_removed = prune_junk_leads(db)
@@ -441,6 +628,11 @@ def cleanup_junk_leads(db: Session = Depends(get_db)):
         "fake_contacts_removed": fake_contacts_removed,
         "contacts_added": contacts_added,
     }
+
+
+@app.get("/suppressions")
+def list_suppressions(db: Session = Depends(get_db)):
+    return {"emails": [s.email for s in db.query(LeadSuppression).all()]}
 
 
 @app.post("/suppressions")

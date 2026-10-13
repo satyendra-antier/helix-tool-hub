@@ -58,7 +58,32 @@ type Lead = {
     email?: string;
     email_verified: boolean;
     consent_basis: string;
+    enrichment_source?: string;
+    confidence?: number | null;
+    source_url?: string | null;
   }[];
+  fit_reason?: string | null;
+  sales_check?: {
+    score: number;
+    bant: Record<string, number>;
+    meddic: Record<string, number>;
+    gaps?: string[];
+    questions?: string[];
+    method?: string;
+  } | null;
+  sources?: { label: string; url: string }[];
+  feedback?: "good" | "bad" | null;
+};
+
+const CHECK_LABELS: Record<string, string> = {
+  budget: "Budget",
+  authority: "Decision maker",
+  need: "Need",
+  timeline: "Timing",
+  metrics: "Clear value",
+  economic_buyer: "Who pays",
+  identify_pain: "Pain",
+  champion: "Champion",
 };
 
 type PipelineStatus = {
@@ -99,6 +124,9 @@ const WEIGHT_LABELS: Record<string, string> = {
   contact_confidence: "Contact Confidence",
   market_demand_fit: "Market Demand",
   capability_fit: "Capability Fit",
+  warm_path: "Warm Path",
+  momentum: "Momentum",
+  sales_check: "Sales Check",
 };
 
 function daysRemaining(deadline?: string) {
@@ -225,10 +253,15 @@ export default function LeadIntelligencePanel() {
     setDiscovering(true);
     try {
       const res = await fetch(`${apiBase}/discover`, { method: "POST" });
-      if (!res.ok) throw new Error("Discovery failed to start");
+      if (!res.ok) throw new Error("Finding leads couldn't start. Please try again.");
       const data = await res.json();
       const poll = setInterval(async () => {
-        const job = await (await fetch(`${apiBase}/jobs/${data.job_id}`)).json();
+        let job: { status?: string; error?: string };
+        try {
+          job = await (await fetch(`${apiBase}/jobs/${data.job_id}`)).json();
+        } catch {
+          job = { status: "failed", error: "Lost connection to the Find Leads service." };
+        }
         if (job.status === "done" || job.status === "failed") {
           clearInterval(poll);
           setDiscovering(false);
@@ -238,14 +271,25 @@ export default function LeadIntelligencePanel() {
       }, 3000);
     } catch (e) {
       setDiscovering(false);
-      setDiscoverError(e instanceof Error ? e.message : "Discovery failed");
+      setDiscoverError(
+        e instanceof TypeError
+          ? "Couldn't reach the Find Leads service. It may still be starting, try again in a minute."
+          : e instanceof Error
+            ? e.message
+            : "Finding leads failed"
+      );
     }
   };
 
   const handleSync = async () => {
     setSyncing(true);
-    await fetch(`${apiBase}/fit-profile/sync`, { method: "POST" });
-    setSyncing(false);
+    try {
+      await fetch(`${apiBase}/fit-profile/sync`, { method: "POST" });
+    } catch {
+      setDiscoverError("Couldn't reach the Find Leads service. It may still be starting, try again in a minute.");
+    } finally {
+      setSyncing(false);
+    }
     loadLeads();
   };
 
@@ -256,6 +300,65 @@ export default function LeadIntelligencePanel() {
       body: JSON.stringify({ stage }),
     });
     loadLeads();
+  };
+
+  const [busyLead, setBusyLead] = useState<string | null>(null);
+
+  const refreshSelected = (lead: Lead) => {
+    setSelected(lead);
+    setLeads((prev) => prev.map((l) => (l.id === lead.id ? lead : l)));
+  };
+
+  const findContacts = async (leadId: string) => {
+    setBusyLead("contacts");
+    try {
+      const res = await fetch(`${apiBase}/leads/${leadId}/find-contacts`, { method: "POST" });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      refreshSelected(data.lead);
+      toast(data.added ? `Found ${data.added} new contact(s)` : "No new contacts found on their website", data.added ? "success" : "default");
+    } catch {
+      toast("Couldn't look up contacts right now");
+    } finally {
+      setBusyLead(null);
+    }
+  };
+
+  const explainLead = async (leadId: string) => {
+    setBusyLead("explain");
+    try {
+      const res = await fetch(`${apiBase}/leads/${leadId}/explain`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "AI explanation failed");
+      }
+      refreshSelected(await res.json());
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "AI explanation failed");
+    } finally {
+      setBusyLead(null);
+    }
+  };
+
+  const sendFeedback = async (leadId: string, verdict: "good" | "bad") => {
+    try {
+      const res = await fetch(`${apiBase}/leads/${leadId}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ verdict }),
+      });
+      const data = await res.json();
+      if (selected) refreshSelected({ ...selected, feedback: verdict });
+      toast(
+        data.weights_updated
+          ? "Thanks! AI updated how it scores leads and is re-scoring now."
+          : verdict === "good" ? "Marked as a good lead" : "Marked as not a fit",
+        "success",
+      );
+      if (verdict === "bad") loadLeads();
+    } catch {
+      toast("Couldn't save your feedback");
+    }
   };
 
   const markSent = async (leadId: string) => {
@@ -290,7 +393,7 @@ export default function LeadIntelligencePanel() {
 
   const radarData = selected
     ? Object.entries(selected.breakdown)
-        .filter(([k, v]) => typeof v === "number")
+        .filter(([k, v]) => typeof v === "number" && k !== "pillar_boost")
         .map(([k, v]) => ({
           metric: WEIGHT_LABELS[k] || k,
           value: v as number,
@@ -301,23 +404,23 @@ export default function LeadIntelligencePanel() {
 
   return (
     <div className="space-y-6">
-      {discoverError && <Alert variant="danger" title="Discovery failed">{discoverError}</Alert>}
+      {discoverError && <Alert variant="danger" title="Couldn't find leads">{discoverError}</Alert>}
       {pipelineStatus && (
         <Card className="accent-strip">
           <CardContent className="py-4 space-y-3">
           <div className="flex justify-between items-start flex-wrap gap-3">
             <div>
               <p className="font-mono text-[10px] uppercase text-text-dim tracking-wider">
-                Market-aligned discovery
+                Leads matched to your markets
               </p>
               <p className="font-mono text-xs text-text-secondary mt-1">
                 {pipelineStatus.aligned_scoring
-                  ? "Demand + future orientation active — scoring uses Market Depth + Build Readiness"
-                  : "Partial alignment — refresh Market Depth and run Build Readiness for full scoring"}
+                  ? "Scores use your results from step 1 (Find Demand) and step 2 (Check Fit)"
+                  : "Run step 1 (Find Demand) and step 2 (Check Fit) for the best scores"}
               </p>
             </div>
             <Button variant="outline" onClick={handleSync} disabled={syncing} size="sm">
-              {syncing ? "Syncing…" : "Sync from Build Readiness"}
+              {syncing ? "Updating…" : "Use latest Check Fit results"}
             </Button>
           </div>
 
@@ -379,16 +482,16 @@ export default function LeadIntelligencePanel() {
       <Tabs value={view} onValueChange={(v) => setView(v as typeof view)}>
         <div className="flex justify-between items-center flex-wrap gap-3">
           <TabsList>
-            <TabsTrigger value="kanban">Kanban</TabsTrigger>
-            <TabsTrigger value="calendar">Gov calendar</TabsTrigger>
-            <TabsTrigger value="settings">Settings</TabsTrigger>
+            <TabsTrigger value="kanban">Lead board</TabsTrigger>
+            <TabsTrigger value="calendar">Tender dates</TabsTrigger>
+            <TabsTrigger value="settings">Scoring settings</TabsTrigger>
           </TabsList>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" asChild>
-              <a href={`${apiBase}/export/csv`}>Export CSV</a>
+              <a href={`${apiBase}/export/csv`}>Download as Excel (CSV)</a>
             </Button>
             <Button onClick={handleDiscover} disabled={discovering}>
-              {discovering ? "Discovering…" : "Run discovery"}
+              {discovering ? "AI is finding leads…" : "Find leads with AI"}
             </Button>
           </div>
         </div>
@@ -432,8 +535,8 @@ export default function LeadIntelligencePanel() {
       <TabsContent value="kanban">
           {!leadsLoading && !leadsError && totalLeads === 0 && (
             <EmptyState
-              title="No leads in pipeline"
-              description="Run discovery to pull government, hiring, and funding signals — or check filters."
+              title="No leads yet"
+              description='Press "Find leads with AI" to pull tenders, hiring and funding signals, or clear the filters.'
             />
           )}
 
@@ -481,6 +584,9 @@ export default function LeadIntelligencePanel() {
                     <p className="font-mono text-[9px] text-text-dim mt-1 truncate">
                       {lead.signal_type} · {lead.source}
                     </p>
+                    {lead.fit_reason && (
+                      <p className="text-[10px] text-text-secondary mt-1 line-clamp-2">{lead.fit_reason}</p>
+                    )}
                   </button>
                 ))}
               </div>
@@ -570,7 +676,7 @@ export default function LeadIntelligencePanel() {
               className="w-full bg-panel-raised border border-border rounded p-3 font-mono text-sm text-text-primary"
             />
             <p className="font-mono text-[10px] text-text-dim mt-2">
-              Use &quot;Sync from Build Readiness&quot; to auto-fill from GO + future domains.
+              Use &quot;Use latest Check Fit results&quot; to auto-fill from GO and future markets.
             </p>
           </div>
           <div className="space-y-3">
@@ -613,8 +719,81 @@ export default function LeadIntelligencePanel() {
                       {selected.lead_orientation}-oriented
                     </Badge>
                   )}
+                  {typeof selected.breakdown.pillar_boost === "number" && selected.breakdown.pillar_boost > 0 && (
+                    <Badge variant="success">+{selected.breakdown.pillar_boost} warm path / momentum</Badge>
+                  )}
+                  {selected.source === "partner" && <Badge variant="primary">partner referral</Badge>}
                 </div>
               </SheetHeader>
+
+            <div className="mt-4 ai-soft border border-primary/20 rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-primary">Why this lead</p>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant={selected.feedback === "good" ? "primary" : "outline"}
+                    onClick={() => sendFeedback(selected.id, "good")}
+                    title="Good lead: AI learns from this"
+                  >
+                    👍
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={selected.feedback === "bad" ? "primary" : "outline"}
+                    onClick={() => sendFeedback(selected.id, "bad")}
+                    title="Not a fit: AI learns from this"
+                  >
+                    👎
+                  </Button>
+                </div>
+              </div>
+              <p className="text-sm text-text-primary">{selected.fit_reason || "No reason yet. Press “Ask AI why”."}</p>
+              {selected.sales_check && (
+                <div className="space-y-1.5">
+                  <p className="text-[11px] text-text-muted">
+                    Sales check {selected.sales_check.score.toFixed(0)}/100
+                    {selected.sales_check.method === "ai" ? " · by AI" : " · by rules"}
+                  </p>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                    {Object.entries({ ...selected.sales_check.bant, ...selected.sales_check.meddic })
+                      .filter(([k]) => CHECK_LABELS[k])
+                      .map(([k, v]) => (
+                        <div key={k}>
+                          <div className="flex justify-between text-[10px] text-text-dim">
+                            <span>{CHECK_LABELS[k]}</span>
+                            <span>{Math.round(Number(v))}</span>
+                          </div>
+                          <div className="h-1 bg-border rounded">
+                            <div className="h-1 bg-primary rounded" style={{ width: `${Math.min(100, Number(v))}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                  {selected.sales_check.gaps && selected.sales_check.gaps.length > 0 && (
+                    <p className="text-[10px] text-text-dim">Still unknown: {selected.sales_check.gaps.join(", ")}</p>
+                  )}
+                  {selected.sales_check.questions && selected.sales_check.questions.length > 0 && (
+                    <ul className="text-[11px] text-text-secondary list-disc pl-4">
+                      {selected.sales_check.questions.map((q) => <li key={q}>{q}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <Button size="sm" variant="outline" onClick={() => explainLead(selected.id)} disabled={busyLead === "explain"}>
+                {busyLead === "explain" ? "AI is thinking…" : "Ask AI why"}
+              </Button>
+              {selected.sources && selected.sources.length > 0 && (
+                <div className="text-[10px] text-text-dim flex flex-wrap gap-2">
+                  <span>Sources:</span>
+                  {selected.sources.map((s) => (
+                    <a key={s.url} href={s.url} target="_blank" rel="noreferrer" className="underline text-accent-b">
+                      {s.label}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {selected.domain_context?.domain_name && (
               <div className="mt-4 bg-panel-raised border border-border rounded p-3">
@@ -657,7 +836,14 @@ export default function LeadIntelligencePanel() {
             </div>
 
             <div className="mt-4">
-              <h3 className="font-mono text-xs text-text-dim uppercase mb-2">Contacts</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-mono text-xs text-text-dim uppercase">Contacts</h3>
+                {!selected.is_portal_lead && (
+                  <Button size="sm" variant="outline" onClick={() => findContacts(selected.id)} disabled={busyLead === "contacts"}>
+                    {busyLead === "contacts" ? "Searching their website…" : "Find contacts"}
+                  </Button>
+                )}
+              </div>
               {selected.contacts.length === 0 ? (
                 <div className="border border-border rounded p-3 font-mono text-xs text-text-secondary">
                   {selected.is_portal_lead || selected.track === "government" ? (
@@ -675,7 +861,7 @@ export default function LeadIntelligencePanel() {
                       )}
                     </>
                   ) : (
-                    <p>No verified contacts yet. Re-run discovery after adding Apollo/Hunter keys, or qualify manually.</p>
+                    <p>No contacts yet. Press “Find contacts” to check their website for people and emails.</p>
                   )}
                 </div>
               ) : (
@@ -687,7 +873,15 @@ export default function LeadIntelligencePanel() {
                       {c.email_verified && (
                         <span className="text-ok text-[10px]">verified ✓</span>
                       )}
-                      <span className="text-text-dim text-[10px]">{c.consent_basis}</span>
+                      {c.confidence != null && (
+                        <span className="text-text-dim text-[10px]">{Math.round(c.confidence * 100)}% sure</span>
+                      )}
+                      <span className="text-text-dim text-[10px]">{c.enrichment_source || c.consent_basis}</span>
+                      {c.source_url && (
+                        <a href={c.source_url} target="_blank" rel="noreferrer" className="text-accent-b text-[10px] underline">
+                          source
+                        </a>
+                      )}
                     </div>
                   </div>
                 ))

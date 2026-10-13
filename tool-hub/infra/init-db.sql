@@ -298,3 +298,132 @@ CREATE TABLE IF NOT EXISTS hub_audit_log (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_hub_audit_org ON hub_audit_log(org_id, created_at DESC);
+
+-- Reach Out (outreach-autopilot)
+CREATE TABLE IF NOT EXISTS outreach_settings (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL,
+  updated_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc')
+);
+CREATE TABLE IF NOT EXISTS outreach_mailboxes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  label TEXT NOT NULL,
+  email TEXT NOT NULL,
+  from_name TEXT,
+  kind TEXT NOT NULL DEFAULT 'smtp',
+  smtp_host TEXT,
+  smtp_port INT DEFAULT 587,
+  smtp_security TEXT DEFAULT 'starttls',
+  imap_host TEXT,
+  imap_port INT DEFAULT 993,
+  username TEXT,
+  secret_enc TEXT,
+  daily_cap_start INT DEFAULT 20,
+  daily_cap_max INT DEFAULT 50,
+  ramp_per_day INT DEFAULT 5,
+  active BOOLEAN DEFAULT true,
+  paused_reason TEXT,
+  sent_today INT DEFAULT 0,
+  sent_today_date TEXT,
+  sent_total INT DEFAULT 0,
+  bounced_total INT DEFAULT 0,
+  last_seen_uid INT DEFAULT 0,
+  last_error TEXT,
+  created_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc')
+);
+CREATE TABLE IF NOT EXISTS outreach_sequences (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  steps JSONB NOT NULL,
+  is_default BOOLEAN DEFAULT false,
+  created_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc')
+);
+CREATE TABLE IF NOT EXISTS outreach_enrollments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id TEXT NOT NULL,
+  lead_name TEXT,
+  company_domain TEXT,
+  contact_email TEXT NOT NULL,
+  contact_name TEXT,
+  contact_title TEXT,
+  phone TEXT,
+  mailbox_id UUID,
+  sequence_id UUID,
+  current_step INT DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'awaiting_approval',
+  next_action_at TIMESTAMP,
+  thread_message_id TEXT,
+  subject TEXT,
+  last_sent_at TIMESTAMP,
+  lead_score NUMERIC,
+  fit_reason TEXT,
+  context JSONB DEFAULT '{}',
+  call_status TEXT,
+  crm_synced_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc'),
+  updated_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS outreach_enrollments_lead_email ON outreach_enrollments (lead_id, contact_email);
+CREATE INDEX IF NOT EXISTS outreach_enrollments_status ON outreach_enrollments (status, next_action_at);
+CREATE TABLE IF NOT EXISTS outreach_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  enrollment_id UUID NOT NULL REFERENCES outreach_enrollments(id) ON DELETE CASCADE,
+  step INT NOT NULL DEFAULT 1,
+  kind TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  subject TEXT,
+  body TEXT,
+  message_id TEXT,
+  in_reply_to TEXT,
+  sent_at TIMESTAMP,
+  error TEXT,
+  needs_approval BOOLEAN DEFAULT true,
+  created_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc')
+);
+CREATE INDEX IF NOT EXISTS outreach_messages_message_id ON outreach_messages (message_id);
+CREATE TABLE IF NOT EXISTS outreach_replies (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  enrollment_id UUID REFERENCES outreach_enrollments(id) ON DELETE CASCADE,
+  mailbox_id UUID,
+  message_id TEXT,
+  from_email TEXT,
+  subject TEXT,
+  body TEXT,
+  category TEXT,
+  confidence NUMERIC,
+  reasoning TEXT,
+  action_taken TEXT,
+  handled BOOLEAN DEFAULT false,
+  received_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS outreach_replies_message_id ON outreach_replies (message_id);
+CREATE TABLE IF NOT EXISTS outreach_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  enrollment_id UUID,
+  kind TEXT NOT NULL,
+  detail JSONB DEFAULT '{}',
+  created_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc')
+);
+CREATE INDEX IF NOT EXISTS outreach_events_created ON outreach_events (created_at DESC);
+CREATE TABLE IF NOT EXISTS outreach_calls (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  enrollment_id UUID NOT NULL REFERENCES outreach_enrollments(id) ON DELETE CASCADE,
+  phone TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  outcome TEXT,
+  provider_call_id TEXT,
+  summary TEXT,
+  transcript TEXT,
+  error TEXT,
+  created_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc'),
+  completed_at TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS outreach_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  result JSONB,
+  error TEXT,
+  created_at TIMESTAMP DEFAULT (now() AT TIME ZONE 'utc'),
+  completed_at TIMESTAMP
+);

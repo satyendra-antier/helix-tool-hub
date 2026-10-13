@@ -115,6 +115,7 @@ services:
       CRUNCHBASE_API_KEY: ${CRUNCHBASE_API_KEY:-}
       ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
       ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
+      GROWTH_PILLARS_API_URL: http://growth-pillars-api:8005
     ports:
       - "${LEAD_INTELLIGENCE_HOST_PORT:-8103}:8003"
     depends_on:
@@ -147,6 +148,57 @@ services:
       market-depth-api:
         condition: service_started
 
+  growth-pillars-api:
+    build:
+      context: ..
+      dockerfile: modules/growth-pillars/backend/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://toolhub:toolhub@postgres:5432/toolhub}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      GROWTH_PILLARS_OPENAI_API_KEY: ${GROWTH_PILLARS_OPENAI_API_KEY:-}
+      GROWTH_PILLARS_OPENAI_MODEL: ${GROWTH_PILLARS_OPENAI_MODEL:-}
+      PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
+      ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
+      ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
+      DEFAULT_COMPANY_URL: ${DEFAULT_COMPANY_URL:-https://www.antier.com/}
+      DEFAULT_COMPANY_NAME: ${DEFAULT_COMPANY_NAME:-Antier}
+      INSIDER_SCAN_INTERVAL_HOURS: ${INSIDER_SCAN_INTERVAL_HOURS:-24}
+      LEAD_INTELLIGENCE_API_URL: http://lead-intelligence-api:8003
+      MARKET_DEPTH_API_URL: http://market-depth-api:8002
+      BUILD_READINESS_API_URL: http://build-readiness-api:8004
+      OUTREACH_API_URL: http://outreach-autopilot-api:8006
+    ports:
+      - "${GROWTH_PILLARS_HOST_PORT:-8105}:8005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      lead-intelligence-api:
+        condition: service_started
+
+  outreach-autopilot-api:
+    build:
+      context: ..
+      dockerfile: modules/outreach-autopilot/backend/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://toolhub:toolhub@postgres:5432/toolhub}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      OUTREACH_OPENAI_API_KEY: ${OUTREACH_OPENAI_API_KEY:-}
+      OUTREACH_OPENAI_MODEL: ${OUTREACH_OPENAI_MODEL:-}
+      OUTREACH_PUBLIC_URL: ${OUTREACH_PUBLIC_URL:-http://localhost:8106}
+      LEAD_INTELLIGENCE_API_URL: http://lead-intelligence-api:8003
+      GROWTH_PILLARS_API_URL: http://growth-pillars-api:8005
+    ports:
+      - "${OUTREACH_HOST_PORT:-8106}:8006"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      lead-intelligence-api:
+        condition: service_started
+
   web:
     build:
       context: ..
@@ -159,10 +211,14 @@ services:
       MARKET_DEPTH_API_URL: ${MARKET_DEPTH_API_URL:-http://market-depth-api:8002}
       LEAD_INTELLIGENCE_API_URL: ${LEAD_INTELLIGENCE_API_URL:-http://lead-intelligence-api:8003}
       BUILD_READINESS_API_URL: ${BUILD_READINESS_API_URL:-http://build-readiness-api:8004}
+      GROWTH_PILLARS_API_URL: ${GROWTH_PILLARS_API_URL:-http://growth-pillars-api:8005}
       VIDEO_SCRAPER_PUBLIC_URL: ${VIDEO_SCRAPER_PUBLIC_URL:-http://localhost:8101}
       MARKET_DEPTH_PUBLIC_URL: ${MARKET_DEPTH_PUBLIC_URL:-http://localhost:8102}
       LEAD_INTELLIGENCE_PUBLIC_URL: ${LEAD_INTELLIGENCE_PUBLIC_URL:-http://localhost:8103}
       BUILD_READINESS_PUBLIC_URL: ${BUILD_READINESS_PUBLIC_URL:-http://localhost:8104}
+      GROWTH_PILLARS_PUBLIC_URL: ${GROWTH_PILLARS_PUBLIC_URL:-http://localhost:8105}
+      OUTREACH_API_URL: ${OUTREACH_API_URL:-http://outreach-autopilot-api:8006}
+      OUTREACH_PUBLIC_URL: ${OUTREACH_PUBLIC_URL:-http://localhost:8106}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
@@ -186,6 +242,10 @@ services:
       lead-intelligence-api:
         condition: service_started
       build-readiness-api:
+        condition: service_started
+      growth-pillars-api:
+        condition: service_started
+      outreach-autopilot-api:
         condition: service_started
 
 volumes:

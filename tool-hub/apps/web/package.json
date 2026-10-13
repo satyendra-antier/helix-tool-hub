@@ -15,6 +15,8 @@
     "@tool-hub/market-depth-frontend": "*",
     "@tool-hub/lead-intelligence-frontend": "*",
     "@tool-hub/build-readiness-frontend": "*",
+    "@tool-hub/growth-pillars-frontend": "*",
+    "@tool-hub/outreach-autopilot-frontend": "*",
     "@xyflow/react": "^12.3.6",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",

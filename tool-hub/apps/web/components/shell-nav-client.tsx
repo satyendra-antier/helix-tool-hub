@@ -34,7 +34,7 @@ export function ShellNavClient({ tools }: { tools: NavTool[] }) {
         <div className="flex items-center gap-6 min-w-0">
           <Link href="/" className="flex items-center gap-2 shrink-0 font-semibold text-text-primary">
             <LayoutGrid className="h-5 w-5 text-primary" />
-            <span>Tool Hub</span>
+            <span>LeadGen AI</span>
           </Link>
 
           <nav className="hidden md:flex items-center gap-1">

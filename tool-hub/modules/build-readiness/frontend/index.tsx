@@ -146,7 +146,7 @@ export default function BuildReadinessPanel() {
       setTotalDomains(v.total_domains || (v.verdicts || []).length);
       if (v.analyze_in_progress && busy !== "analyzing") setBusy("analyzing");
     } catch {
-      setLoadError("Could not load Build Readiness data. Check that the API is running.");
+      setLoadError("Couldn't load Check Fit results. The service may still be starting, try again in a minute.");
     } finally {
       setLoading(false);
     }
@@ -187,7 +187,14 @@ export default function BuildReadinessPanel() {
   const runJob = async (path: string, label: string) => {
     setJobError(null);
     setBusy(label);
-    const res = await fetch(`${apiBase}${path}`, { method: "POST" });
+    let res: Response;
+    try {
+      res = await fetch(`${apiBase}${path}`, { method: "POST" });
+    } catch {
+      setJobError("Couldn't reach the Check Fit service. It may still be starting, try again in a minute.");
+      setBusy(null);
+      return;
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       setJobError(err.detail || "Request failed");
@@ -244,17 +251,17 @@ export default function BuildReadinessPanel() {
             </Alert>
           )}
           {missingDomains.length > 0 && !isAnalyzing && (
-            <Alert variant="warning" title={`${missingDomains.length} domain(s) need Fit Analysis`}>
+            <Alert variant="warning" title={`${missingDomains.length} market(s) not checked yet`}>
               <p className="mb-3">{missingDomains.join(", ")}</p>
               <Button size="sm" onClick={() => runJob("/analyze", "analyzing")} disabled={!!busy || !pipeline?.can_analyze}>
-                Run Fit Analysis
+                Check our fit
               </Button>
             </Alert>
           )}
           {isAnalyzing && analyzeProgress?.domains && (
             <div className="space-y-2">
               <div className="flex justify-between text-xs text-text-secondary">
-                <span>Fit Analysis · {analyzeProgress.domains_done ?? 0}/{analyzeProgress.domains} domains</span>
+                <span>AI is checking our fit · {analyzeProgress.domains_done ?? 0}/{analyzeProgress.domains} markets</span>
                 <span>{progressPct}%</span>
               </div>
               <Progress value={progressPct} />
@@ -296,7 +303,7 @@ export default function BuildReadinessPanel() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Company configuration</CardTitle>
+          <CardTitle>Your company</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -312,16 +319,16 @@ export default function BuildReadinessPanel() {
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={saveProfile} disabled={!!busy}>Save</Button>
             <Button onClick={() => runJob("/index/website", "indexing")} disabled={!!busy || !apiConfigured}>
-              {busy === "indexing" ? <><Loader2 className="h-4 w-4 animate-spin" /> Indexing…</> : "Index website"}
+              {busy === "indexing" ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading website…</> : "Read our website"}
             </Button>
             <Button variant="secondary" onClick={() => runJob("/index/website?full=true", "full-index")} disabled={!!busy || !apiConfigured}>
-              {busy === "full-index" ? "Re-indexing…" : "Full re-index"}
+              {busy === "full-index" ? "Re-reading…" : "Re-read whole website"}
             </Button>
             <Button variant="outline" onClick={() => runJob("/index/videos", "videos")} disabled={!!busy || !apiConfigured}>
-              {busy === "videos" ? "Indexing videos…" : "Add video transcripts"}
+              {busy === "videos" ? "Adding videos…" : "Add Proof Library videos"}
             </Button>
             <Button variant="secondary" onClick={() => runJob("/analyze", "analyzing")} disabled={!!busy || !pipeline?.can_analyze || !apiConfigured}>
-              {busy === "analyzing" ? "Analyzing…" : missingDomains.length ? `Run Fit Analysis (${missingDomains.length})` : "Run Fit Analysis"}
+              {busy === "analyzing" ? "AI is checking…" : missingDomains.length ? `Check our fit (${missingDomains.length} markets)` : "Check our fit"}
             </Button>
           </div>
           {profile && (
@@ -331,7 +338,7 @@ export default function BuildReadinessPanel() {
             </p>
           )}
           <p className="text-xs text-text-secondary">
-            Index website updates company depth only. Run Fit Analysis to generate GO/NO_GO verdicts per domain.
+            First let AI read your website so it knows what you build. Then press "Check our fit" to get a GO / maybe / no answer for each market.
           </p>
         </CardContent>
       </Card>
@@ -402,7 +409,7 @@ export default function BuildReadinessPanel() {
       ) : (
         <EmptyState
           title="No verdicts yet"
-          description="Complete the pipeline: refresh Market Depth, index your website, then run Fit Analysis."
+          description='Run step 1 (Find Demand), let AI read your website, then press "Check our fit".'
         />
       )}
 

@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     adzuna_app_id: str = ""
     adzuna_app_key: str = ""
     rate_limit_seconds: float = 1.0
+    # Empty disables the Growth Pillars score boost (e.g. when that module isn't running).
+    growth_pillars_api_url: str = ""
+    # Contact finder: SMTP RCPT probing needs outbound port 25, which many networks block.
+    contact_smtp_probe: bool = False
+    paid_lookup_min_score: float = 70.0
 
     def resolve_api_key(self) -> str:
         return self.lead_intelligence_openai_api_key or self.openai_api_key

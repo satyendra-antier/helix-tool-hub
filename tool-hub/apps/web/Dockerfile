@@ -11,6 +11,8 @@ COPY modules/video-scraper/frontend/package.json ./modules/video-scraper/fronten
 COPY modules/market-depth-analyzer/frontend/package.json ./modules/market-depth-analyzer/frontend/
 COPY modules/lead-intelligence/frontend/package.json ./modules/lead-intelligence/frontend/
 COPY modules/build-readiness/frontend/package.json ./modules/build-readiness/frontend/
+COPY modules/growth-pillars/frontend/package.json ./modules/growth-pillars/frontend/
+COPY modules/outreach-autopilot/frontend/package.json ./modules/outreach-autopilot/frontend/
 RUN npm install --legacy-peer-deps
 
 FROM base AS builder

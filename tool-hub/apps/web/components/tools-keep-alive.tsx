@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ToolManifest } from "@tool-hub/shared-types";
 import { ToolProvider } from "@/lib/tool-context";
 import { ToolHost } from "@/components/tool-host";
-import { ModuleAccentShell, ModulePageHeader } from "@/components/module-page-header";
+import { ModuleAccentShell, ModulePageHeader, ModuleStepFooter } from "@/components/module-page-header";
 
 type Props = {
   tools: ToolManifest[];
@@ -67,6 +67,7 @@ export function ToolsKeepAlive({ tools, backends, vault }: Props) {
                   category={manifest.category}
                 />
                 <ToolHost slug={id} />
+                <ModuleStepFooter moduleId={id} />
               </ModuleAccentShell>
             </ToolProvider>
           </div>

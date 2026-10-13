@@ -5,6 +5,8 @@ const MODULE_API_URLS: Record<string, string | undefined> = {
   "market-depth-analyzer": process.env.MARKET_DEPTH_API_URL,
   "lead-intelligence": process.env.LEAD_INTELLIGENCE_API_URL,
   "build-readiness": process.env.BUILD_READINESS_API_URL,
+  "growth-pillars": process.env.GROWTH_PILLARS_API_URL,
+  "outreach-autopilot": process.env.OUTREACH_API_URL,
 };
 
 const MODULE_HOST_PORTS: Record<string, string> = {
@@ -12,6 +14,8 @@ const MODULE_HOST_PORTS: Record<string, string> = {
   "market-depth-analyzer": process.env.MARKET_DEPTH_HOST_PORT || "8102",
   "lead-intelligence": process.env.LEAD_INTELLIGENCE_HOST_PORT || "8103",
   "build-readiness": process.env.BUILD_READINESS_HOST_PORT || "8104",
+  "growth-pillars": process.env.GROWTH_PILLARS_HOST_PORT || "8105",
+  "outreach-autopilot": process.env.OUTREACH_HOST_PORT || "8106",
 };
 
 const DEFAULT_TIMEOUT_MS = 12_000;

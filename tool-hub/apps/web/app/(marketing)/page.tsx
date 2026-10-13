@@ -7,7 +7,7 @@ export default function MarketingHomePage() {
       <MarketingNav />
       <LandingPage />
       <footer className="border-t border-border py-8 text-center text-sm text-text-muted">
-        <p>Tool Hub — Revenue Intelligence Engine</p>
+        <p>LeadGen AI — Find and win leads with AI</p>
         <p className="mt-2">
           <a href="/methodology" className="hover:text-text-primary">Methodology</a>
           {" · "}

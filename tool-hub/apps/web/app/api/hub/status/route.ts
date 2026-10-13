@@ -53,6 +53,8 @@ export async function GET() {
     buildConfig,
     leadConfig,
     videoConfig,
+    pillarsStatus,
+    reachOutStatus,
   ] = await Promise.all([
     fetchModuleJson<{
       scores: Array<{ domain: string; composite_score: number; components?: Record<string, number> }>;
@@ -90,6 +92,23 @@ export async function GET() {
     fetchModuleJson<Record<string, unknown>>("build-readiness", "/config"),
     fetchModuleJson<Record<string, unknown>>("lead-intelligence", "/config"),
     fetchModuleJson<Record<string, unknown>>("video-scraper", "/config"),
+    fetchModuleJson<{
+      counts: Record<string, number>;
+      visibility_share: number | null;
+    }>("growth-pillars", "/status"),
+    fetchModuleJson<{
+      autopilot_enabled: boolean;
+      paused: boolean;
+      mailboxes: number;
+      sandbox_only: boolean;
+      waiting_approval: number;
+      in_sequence: number;
+      hot_leads: number;
+      sent_today: number;
+      replies_today: number;
+      unread_replies: number;
+      next_heartbeat?: string | null;
+    }>("outreach-autopilot", "/status", { timeoutMs: 8_000 }),
   ]);
 
   const health: HealthResult[] = await Promise.all(
@@ -198,6 +217,28 @@ export async function GET() {
       videoScraper: {
         ready: (videoJobs?.jobs || []).some((j) => j.status === "done" || j.status === "partial"),
         route: "/tools/video-scraper",
+      },
+      growthPillars: {
+        ready: (pillarsStatus?.counts?.watched_accounts || 0) > 0,
+        route: "/tools/growth-pillars",
+        counts: pillarsStatus?.counts || {},
+        visibilityShare: pillarsStatus?.visibility_share ?? null,
+      },
+      reachOut: {
+        ready: (reachOutStatus?.in_sequence || 0) + (reachOutStatus?.hot_leads || 0) > 0,
+        route: "/tools/outreach-autopilot",
+        online: !!reachOutStatus,
+        autopilotEnabled: reachOutStatus?.autopilot_enabled ?? false,
+        paused: reachOutStatus?.paused ?? false,
+        mailboxes: reachOutStatus?.mailboxes ?? 0,
+        sandboxOnly: reachOutStatus?.sandbox_only ?? false,
+        waitingApproval: reachOutStatus?.waiting_approval ?? 0,
+        inSequence: reachOutStatus?.in_sequence ?? 0,
+        hotLeads: reachOutStatus?.hot_leads ?? 0,
+        sentToday: reachOutStatus?.sent_today ?? 0,
+        repliesToday: reachOutStatus?.replies_today ?? 0,
+        unreadReplies: reachOutStatus?.unread_replies ?? 0,
+        nextCheck: reachOutStatus?.next_heartbeat ?? null,
       },
     },
     activity: [

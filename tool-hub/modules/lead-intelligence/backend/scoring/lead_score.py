@@ -103,6 +103,7 @@ def score_lead(
     *,
     orientation: str = "generic",
     best_match: dict | None = None,
+    pillar_signal: dict | None = None,
 ) -> tuple[float, dict]:
     components = {
         "recency": recency_decay(signal_date),
@@ -125,4 +126,10 @@ def score_lead(
         breakdown["verdict"] = best_match.get("verdict")
         breakdown["market_score"] = round(float(best_match.get("market_score") or 0), 1)
         breakdown["capability_score"] = round(float(best_match.get("capability_score") or 0), 1)
-    return round(composite * 100, 2), breakdown
+    score = composite * 100
+    if pillar_signal and pillar_signal.get("points"):
+        score = min(100.0, score + float(pillar_signal["points"]))
+        breakdown["pillar_boost"] = pillar_signal["points"]
+        breakdown["warm_path"] = pillar_signal.get("warm_path", 0)
+        breakdown["momentum"] = pillar_signal.get("momentum", 0)
+    return round(score, 2), breakdown

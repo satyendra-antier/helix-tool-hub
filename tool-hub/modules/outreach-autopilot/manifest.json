@@ -1,0 +1,12 @@
+{
+  "id": "outreach-autopilot",
+  "name": "Reach Out",
+  "tagline": "AI emails your best leads from your own mailbox, follows up, reads replies and books meetings.",
+  "icon": "send",
+  "route": "/tools/outreach-autopilot",
+  "backendBaseUrl": "http://outreach-autopilot-api:8006",
+  "status": "beta",
+  "requiredEnv": [],
+  "category": "growth",
+  "version": "1.0.0"
+}

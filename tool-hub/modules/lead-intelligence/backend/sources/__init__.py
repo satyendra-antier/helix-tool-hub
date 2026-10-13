@@ -308,17 +308,19 @@ def fetch_web3_jobs() -> list[RawLead]:
                 jobs = resp.json()
                 if isinstance(jobs, list):
                     companies: dict[str, int] = {}
+                    company_urls: dict[str, str] = {}
                     for j in jobs[:50]:
                         if not isinstance(j, dict):
                             continue
                         co = j.get("company", j.get("company_name", ""))
                         if co:
                             companies[co] = companies.get(co, 0) + 1
+                            company_urls.setdefault(co, j.get("company_url") or "")
                     for co, count in sorted(companies.items(), key=lambda x: -x[1])[:15]:
                         leads.append(RawLead(
                             name=co,
                             track="web3",
-                            domain=_extract_domain(j.get("url", "")) if jobs else None,
+                            domain=_extract_domain(company_urls.get(co, "")),
                             description=f"Hiring surge: {count} open roles on Web3.career",
                             source="web3.career",
                             signal_type="hiring",

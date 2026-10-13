@@ -14,7 +14,7 @@ export function ComparisonTable() {
           <tr className="border-b border-border bg-surface-muted text-left">
             <th className="p-4 font-medium text-text-muted w-1/4" />
             <th className="p-4 font-medium text-text-secondary">AI agents (Claude, Cursor, Gemini)</th>
-            <th className="p-4 font-medium text-text-primary">Tool Hub Revenue Engine</th>
+            <th className="p-4 font-medium text-text-primary">LeadGen AI</th>
           </tr>
         </thead>
         <tbody>

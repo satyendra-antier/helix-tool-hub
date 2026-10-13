@@ -28,6 +28,9 @@ class LeadEntity(Base):
     lead_orientation = Column(String, default="generic")  # demand | future | generic
     matched_domains = Column(JSONB, default=list)
     domain_context = Column(JSONB, default=dict)
+    fit_reason = Column(Text)
+    sales_check = Column(JSONB)
+    sources = Column(JSONB, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -41,6 +44,19 @@ class LeadContact(Base):
     email_verified = Column(Boolean, default=False)
     enrichment_source = Column(String)
     consent_basis = Column(String, nullable=False)
+    confidence = Column(Numeric)
+    source_url = Column(Text)
+    verified_at = Column(DateTime)
+    phone = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LeadFeedback(Base):
+    __tablename__ = "leads_feedback"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_id = Column(UUID(as_uuid=True))
+    verdict = Column(String, nullable=False)  # good | bad
+    breakdown = Column(JSONB)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -173,6 +189,23 @@ def run_migrations():
         conn.execute(text(
             "ALTER TABLE leads_entities ADD COLUMN IF NOT EXISTS domain_context JSONB DEFAULT '{}'"
         ))
+        for col, typ in (
+            ("confidence", "NUMERIC"), ("source_url", "TEXT"),
+            ("verified_at", "TIMESTAMPTZ"), ("phone", "TEXT"),
+        ):
+            conn.execute(text(f"ALTER TABLE leads_contacts ADD COLUMN IF NOT EXISTS {col} {typ}"))
+        conn.execute(text("ALTER TABLE leads_entities ADD COLUMN IF NOT EXISTS fit_reason TEXT"))
+        conn.execute(text("ALTER TABLE leads_entities ADD COLUMN IF NOT EXISTS sales_check JSONB"))
+        conn.execute(text("ALTER TABLE leads_entities ADD COLUMN IF NOT EXISTS sources JSONB DEFAULT '[]'"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS leads_feedback (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              entity_id UUID REFERENCES leads_entities(id) ON DELETE CASCADE,
+              verdict TEXT NOT NULL,
+              breakdown JSONB,
+              created_at TIMESTAMPTZ DEFAULT now()
+            )
+        """))
         conn.commit()
 
 

@@ -1,33 +1,42 @@
+const STEPS = [
+  { x: 15, title: "1 · Find Demand", sub: "Where buyers spend", color: "#2563eb" },
+  { x: 195, title: "2 · Check Fit", sub: "GO / maybe / no", color: "#0d9488" },
+  { x: 375, title: "3 · Find Leads", sub: "Scored companies", color: "#7c3aed" },
+  { x: 555, title: "4 · Win Leads", sub: "Warm paths + coach", color: "#c026d3" },
+];
+
 export function FlywheelDiagram({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 720 280" className={className} aria-label="Revenue intelligence flywheel">
+    <svg viewBox="0 0 720 280" className={className} aria-label="LeadGen AI four-step flow">
       <defs>
         <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
           <path d="M0,0 L6,3 L0,6 Z" fill="#64748b" />
         </marker>
       </defs>
-      <rect x="20" y="90" width="150" height="64" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
-      <text x="95" y="118" textAnchor="middle" className="fill-slate-900 text-[13px] font-semibold">Market Depth</text>
-      <text x="95" y="136" textAnchor="middle" className="fill-slate-500 text-[11px]">12 domains · 5 signals</text>
+      {STEPS.map((s) => (
+        <g key={s.title}>
+          <rect x={s.x} y="90" width="150" height="64" rx="10" fill="#ffffff" stroke={s.color} strokeWidth="1.5" />
+          <rect x={s.x} y="90" width="150" height="5" rx="2" fill={s.color} />
+          <text x={s.x + 75} y="120" textAnchor="middle" className="fill-slate-900 text-[13px] font-semibold">
+            {s.title}
+          </text>
+          <text x={s.x + 75} y="138" textAnchor="middle" className="fill-slate-500 text-[11px]">
+            {s.sub}
+          </text>
+        </g>
+      ))}
+      {[165, 345, 525].map((x) => (
+        <line key={x} x1={x} y1="122" x2={x + 30} y2="122" stroke="#64748b" markerEnd="url(#arrow)" />
+      ))}
 
-      <rect x="220" y="90" width="150" height="64" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
-      <text x="295" y="118" textAnchor="middle" className="fill-slate-900 text-[13px] font-semibold">Build Readiness</text>
-      <text x="295" y="136" textAnchor="middle" className="fill-slate-500 text-[11px]">GO / NO_GO + citations</text>
+      <rect x="195" y="200" width="150" height="56" rx="10" fill="#fffbeb" stroke="#fde68a" />
+      <text x="270" y="226" textAnchor="middle" className="fill-slate-900 text-[13px] font-semibold">Proof Library</text>
+      <text x="270" y="243" textAnchor="middle" className="fill-slate-500 text-[11px]">Demo videos as proof</text>
+      <line x1="270" y1="200" x2="270" y2="154" stroke="#94a3b8" strokeDasharray="4 3" markerEnd="url(#arrow)" />
 
-      <rect x="420" y="90" width="150" height="64" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
-      <text x="495" y="118" textAnchor="middle" className="fill-slate-900 text-[13px] font-semibold">Lead Intelligence</text>
-      <text x="495" y="136" textAnchor="middle" className="fill-slate-500 text-[11px]">Demand + future pipeline</text>
-
-      <rect x="220" y="200" width="150" height="56" rx="8" fill="#f8fafc" stroke="#e2e8f0" />
-      <text x="295" y="232" textAnchor="middle" className="fill-slate-900 text-[13px] font-semibold">Video Scraper</text>
-
-      <line x1="170" y1="122" x2="220" y2="122" stroke="#64748b" markerEnd="url(#arrow)" />
-      <line x1="370" y1="122" x2="420" y2="122" stroke="#64748b" markerEnd="url(#arrow)" />
-      <line x1="295" y1="154" x2="295" y2="200" stroke="#64748b" markerEnd="url(#arrow)" />
-      <line x1="370" y1="228" x2="420" y2="140" stroke="#94a3b8" strokeDasharray="4 3" markerEnd="url(#arrow)" />
-
-      <text x="600" y="124" className="fill-slate-400 text-[11px]">Weekly refresh</text>
-      <path d="M560 100 Q640 60 680 100" fill="none" stroke="#cbd5e1" strokeWidth="1.5" markerEnd="url(#arrow)" />
+      <text x="360" y="50" textAnchor="middle" className="fill-slate-400 text-[11px]">
+        Run all four with one click, or step by step
+      </text>
     </svg>
   );
 }

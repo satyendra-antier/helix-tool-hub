@@ -1,7 +1,7 @@
 {
   "id": "lead-intelligence",
-  "name": "Lead Intelligence Engine",
-  "tagline": "Government tenders, funded projects, and hiring signals — organized, scored, never spammed.",
+  "name": "Find Leads",
+  "tagline": "AI finds and scores companies that need what we build: tenders, funded projects and hiring.",
   "icon": "radar",
   "route": "/tools/lead-intelligence",
   "backendBaseUrl": "http://lead-intelligence-api:8003",

@@ -185,8 +185,13 @@ export default function MarketDepthPanel() {
   useEffect(() => {
     if (!refreshJobId) return;
     const interval = setInterval(async () => {
-      const res = await fetch(`${apiBase}/jobs/${refreshJobId}`);
-      const job = await res.json();
+      let job: { status?: string };
+      try {
+        const res = await fetch(`${apiBase}/jobs/${refreshJobId}`);
+        job = res.ok ? await res.json() : { status: "failed" };
+      } catch {
+        job = { status: "failed" };
+      }
       if (job.status === "done" || job.status === "failed") {
         setRefreshing(false);
         setRefreshJobId(null);
@@ -214,9 +219,17 @@ export default function MarketDepthPanel() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    const res = await fetch(`${apiBase}/refresh`, { method: "POST" });
-    const data = await res.json();
-    setRefreshJobId(data.job_id);
+    setLoadError(null);
+    try {
+      const res = await fetch(`${apiBase}/refresh`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data.job_id) throw new Error("no job id");
+      setRefreshJobId(data.job_id);
+    } catch {
+      setRefreshing(false);
+      setLoadError("Couldn't start the scan. The Find Demand service isn't running, try again in a minute.");
+    }
   };
 
   const topThree = [...scores].sort((a, b) => b.composite_score - a.composite_score).slice(0, 3);
@@ -243,9 +256,9 @@ export default function MarketDepthPanel() {
       {loadError && <Alert variant="danger" title="Load error">{loadError}</Alert>}
       {staleApiKeyReport && (
         <Alert variant="warning" title="Report may be stale">
-          API keys are configured but the stored report predates them. Refresh to regenerate narratives.
+          Your API keys were added after this scan. Scan again to get the full AI summary.
           <div className="mt-3">
-            <Button size="sm" onClick={handleRefresh} disabled={refreshing}>Refresh data</Button>
+            <Button size="sm" onClick={handleRefresh} disabled={refreshing}>Scan the market</Button>
           </div>
         </Alert>
       )}
@@ -278,12 +291,12 @@ export default function MarketDepthPanel() {
               </CardContent>
             </Card>
           ) : (
-            <EmptyState title="No report yet" description="Click Refresh Data to pull live market signals." />
+            <EmptyState title="No market scan yet" description='Press "Scan the market" and AI will pull live demand signals.' />
           )}
         </div>
         <div className="text-right">
           <Button onClick={handleRefresh} disabled={refreshing}>
-            {refreshing ? "Refreshing…" : "Refresh data"}
+            {refreshing ? "AI is scanning…" : "Scan the market"}
           </Button>
           {fetchedAt && (
             <p className="text-xs text-text-muted mt-2">Last updated: {new Date(fetchedAt).toLocaleString()}</p>
@@ -436,7 +449,7 @@ export default function MarketDepthPanel() {
                     ))}
                   </div>
                 ) : (
-                  <p className="font-mono text-xs text-text-dim">Run Refresh Data to populate product types</p>
+                  <p className="font-mono text-xs text-text-dim">Press "Scan the market" to see product types</p>
                 )}
               </div>
 

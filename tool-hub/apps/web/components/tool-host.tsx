@@ -20,6 +20,14 @@ const MODULE_COMPONENTS: Record<string, React.ComponentType> = {
     () => import("@tool-hub/build-readiness-frontend").then((m) => m.default),
     { ssr: false, loading: () => <ModuleLoaderSkeleton /> }
   ),
+  "growth-pillars": dynamic(
+    () => import("@tool-hub/growth-pillars-frontend").then((m) => m.default),
+    { ssr: false, loading: () => <ModuleLoaderSkeleton /> }
+  ),
+  "outreach-autopilot": dynamic(
+    () => import("@tool-hub/outreach-autopilot-frontend").then((m) => m.default),
+    { ssr: false, loading: () => <ModuleLoaderSkeleton /> }
+  ),
 };
 
 export function ToolHost({ slug }: { slug: string }) {

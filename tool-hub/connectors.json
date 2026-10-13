@@ -4,8 +4,23 @@
     "name": "OpenAI",
     "type": "api_key",
     "description": "Embeddings, narratives, transcription, and lead scoring",
-    "usedByModules": ["build-readiness", "market-depth-analyzer", "lead-intelligence", "video-scraper"],
-    "envKeys": ["OPENAI_API_KEY", "BUILD_READINESS_OPENAI_API_KEY", "MARKET_DEPTH_OPENAI_API_KEY", "LEAD_INTELLIGENCE_OPENAI_API_KEY", "VIDEO_SCRAPER_OPENAI_API_KEY"]
+    "usedByModules": ["build-readiness", "market-depth-analyzer", "lead-intelligence", "video-scraper", "growth-pillars", "outreach-autopilot"],
+    "envKeys": ["OPENAI_API_KEY", "BUILD_READINESS_OPENAI_API_KEY", "MARKET_DEPTH_OPENAI_API_KEY", "LEAD_INTELLIGENCE_OPENAI_API_KEY", "VIDEO_SCRAPER_OPENAI_API_KEY", "GROWTH_PILLARS_OPENAI_API_KEY", "OUTREACH_OPENAI_API_KEY"]
+  },
+  {
+    "id": "perplexity",
+    "name": "Perplexity",
+    "type": "api_key",
+    "description": "Second answer engine for LLM Visibility checks",
+    "usedByModules": ["growth-pillars"],
+    "envKeys": ["PERPLEXITY_API_KEY"]
+  },
+  {
+    "id": "google-news",
+    "name": "Google News RSS",
+    "type": "public",
+    "description": "Account news for the Insider Agent",
+    "usedByModules": ["growth-pillars"]
   },
   {
     "id": "github",
@@ -20,7 +35,7 @@
     "name": "Adzuna",
     "type": "api_key",
     "description": "Hiring demand job listings",
-    "usedByModules": ["market-depth-analyzer", "lead-intelligence"],
+    "usedByModules": ["market-depth-analyzer", "lead-intelligence", "growth-pillars"],
     "envKeys": ["ADZUNA_APP_ID", "ADZUNA_APP_KEY"]
   },
   {
@@ -74,5 +89,45 @@
     "type": "public",
     "description": "Product launch and funding signals",
     "usedByModules": ["market-depth-analyzer"]
+  },
+  {
+    "id": "slack",
+    "name": "Slack",
+    "type": "api_key",
+    "description": "Hot-lead alerts and the daily outreach summary",
+    "usedByModules": ["outreach-autopilot"],
+    "envKeys": ["SLACK_WEBHOOK_URL"]
+  },
+  {
+    "id": "telegram",
+    "name": "Telegram",
+    "type": "api_key",
+    "description": "Hot-lead alerts and the daily outreach summary",
+    "usedByModules": ["outreach-autopilot"],
+    "envKeys": ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
+  },
+  {
+    "id": "hubspot",
+    "name": "HubSpot",
+    "type": "api_key",
+    "description": "Push contacts, status and replies to your CRM",
+    "usedByModules": ["outreach-autopilot"],
+    "envKeys": ["HUBSPOT_ACCESS_TOKEN"]
+  },
+  {
+    "id": "twenty",
+    "name": "Twenty CRM",
+    "type": "api_key",
+    "description": "Open-source CRM sync for companies and people",
+    "usedByModules": ["outreach-autopilot"],
+    "envKeys": ["TWENTY_API_URL", "TWENTY_API_KEY"]
+  },
+  {
+    "id": "dograh",
+    "name": "Dograh voice AI",
+    "type": "api_key",
+    "description": "Self-hosted AI phone calls after email touch 2",
+    "usedByModules": ["outreach-autopilot"],
+    "envKeys": ["DOGRAH_API_URL", "DOGRAH_API_KEY", "DOGRAH_WORKFLOW_ID"]
   }
 ]

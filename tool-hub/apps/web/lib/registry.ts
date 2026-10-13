@@ -54,6 +54,8 @@ export function resolveBackendUrl(manifest: ToolManifest): string {
     "market-depth-analyzer": process.env.MARKET_DEPTH_PUBLIC_URL,
     "lead-intelligence": process.env.LEAD_INTELLIGENCE_PUBLIC_URL,
     "build-readiness": process.env.BUILD_READINESS_PUBLIC_URL,
+    "growth-pillars": process.env.GROWTH_PILLARS_PUBLIC_URL,
+    "outreach-autopilot": process.env.OUTREACH_PUBLIC_URL,
   };
   if (publicMap[manifest.id]) return publicMap[manifest.id]!;
 
@@ -62,6 +64,8 @@ export function resolveBackendUrl(manifest: ToolManifest): string {
     "market-depth-analyzer": process.env.MARKET_DEPTH_HOST_PORT || "8102",
     "lead-intelligence": process.env.LEAD_INTELLIGENCE_HOST_PORT || "8103",
     "build-readiness": process.env.BUILD_READINESS_HOST_PORT || "8104",
+    "growth-pillars": process.env.GROWTH_PILLARS_HOST_PORT || "8105",
+    "outreach-autopilot": process.env.OUTREACH_HOST_PORT || "8106",
   };
   return `http://localhost:${portMap[manifest.id] || "8100"}`;
 }
